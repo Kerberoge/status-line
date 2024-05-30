@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <time.h>
 #include <signal.h>
+#include <pthread.h>
+#include <pulse/pulseaudio.h>
 #include <net/if.h>
 #include <linux/nl80211.h>
 #include <netlink/genl/genl.h>
@@ -16,15 +18,99 @@
 #define MB 1048576
 #define GB 1073741824
 
+struct pa_connection {
+	pa_mainloop *mainloop;
+	pa_mainloop_api *api;
+	pa_context *context;
+	pthread_t thread;
+};
+
 struct cpu_usage {
 	unsigned int user, nice, system, idle, total;
 };
 
+void handle_signals(int signal);
+void update_volume_cb(pa_context *c, const pa_sink_info *info, int eol, void *data);
+void subscribe_cb(pa_context *c, pa_subscription_event_type_t t, uint32_t i, void *data);
+void context_state_cb(pa_context *c, void *data);
+void initialize_pulse();
+void cleanup_pulse();
+void *pulse_worker(void *data);
+void volume(char *buffer);
+int startswith(char *a, char *b);
+void memory(char *buffer);
+void cpu(char *buffer);
+void temperature(char *buffer);
+void battery(char *buffer);
+int wifi_cb(struct nl_msg *msg, void *data);
+void wifi(char *buffer);
+void date(char *buffer);
+void print_status();
+
 int stop_program = 0;
+int audio_volume = 0, audio_muted = 0;
 struct cpu_usage prev = {0, 0, 0, 0, 0};
 
 void handle_signals(int signal) {
 	stop_program = 1;
+}
+
+void update_volume_cb(pa_context *c, const pa_sink_info *info, int eol, void *data) {
+	if (eol > 0 || !info) return;
+
+	audio_volume = pa_cvolume_avg(&info->volume);
+	audio_muted = info->mute;
+
+	print_status();
+}
+
+void subscribe_cb(pa_context *c, pa_subscription_event_type_t t, uint32_t i, void *data) {
+	pa_context_get_sink_info_by_name(c, "@DEFAULT_SINK@", update_volume_cb, NULL);
+}
+
+void context_state_cb(pa_context *c, void *data) {
+	struct pa_connection *con = data;
+	if (pa_context_get_state(c) == PA_CONTEXT_READY) {
+		pa_context_get_sink_info_by_name(c, "@DEFAULT_SINK@", update_volume_cb, NULL);
+
+		pa_context_set_subscribe_callback(con->context, subscribe_cb, NULL);
+		pa_context_subscribe(con->context, PA_SUBSCRIPTION_MASK_SINK, NULL, NULL);
+	}
+}
+
+void initialize_pulse(struct pa_connection *con) {
+	con->mainloop = pa_mainloop_new();
+	con->api = pa_mainloop_get_api(con->mainloop);
+	con->context = pa_context_new(con->api, "status-line");
+
+	pa_context_set_state_callback(con->context, context_state_cb, con);
+	pa_context_connect(con->context, NULL, PA_CONTEXT_NOFLAGS, NULL);
+
+	pthread_create(&con->thread, NULL, pulse_worker, con);
+}
+
+void cleanup_pulse(struct pa_connection *con) {
+	pa_mainloop_quit(con->mainloop, 0);
+	pa_context_disconnect(con->context);
+	pa_context_unref(con->context);
+	pa_mainloop_free(con->mainloop);
+
+	pthread_join(con->thread, NULL);
+}
+
+void *pulse_worker(void *data) {
+	struct pa_connection *con = data;
+	pa_mainloop_run(con->mainloop, NULL);
+
+	return NULL;
+}
+
+void volume(char *buffer) {
+	if (audio_muted)
+		sprintf(buffer, "^fg(" FG_AC ")^fg() muted");
+	else
+		sprintf(buffer, "^fg(" FG_AC ")^fg() %.0f%%",
+				(float) audio_volume / PA_VOLUME_NORM * 100);
 }
 
 int startswith(char *a, char *b) {
@@ -70,7 +156,7 @@ void cpu(char *buffer) {
 	diff_idle = curr.idle - prev.idle;
 	diff_total = curr.total - prev.total;
 	prev = curr;
-	usage = (float) (diff_total - diff_idle) / diff_total * 100;
+	usage = (float) (diff_total - diff_idle) / (diff_total + 1) * 100;
 
 	if (usage >= 90)
 		sprintf(buffer, "^fg(" FG_AC ")^fg() ^fg(" FG_UR ")%02.0f%%^fg()", usage);
@@ -82,8 +168,7 @@ void temperature(char *buffer) {
 	FILE *temperature_f = fopen("/sys/class/hwmon/hwmon3/temp1_input", "r");
 	int temperature;
 
-	if (!temperature_f)
-		return;
+	if (!temperature_f) return;
 
 	fscanf(temperature_f, "%d", &temperature);
 	fclose(temperature_f);
@@ -102,8 +187,7 @@ void battery(char *buffer) {
 	unsigned int capacity;
 	char status[20];
 
-	if (!capacity_f || !status_f)
-		return;
+	if (!capacity_f || !status_f) return;
 
 	fscanf(capacity_f, "%u", &capacity);
 	fscanf(status_f, "%s", status);
@@ -159,8 +243,7 @@ void wifi(char *buffer) {
 
 	nl_socket_free(sk);
 
-	if (!ssid)
-		return;
+	if (!ssid) return;
 
 	sprintf(buffer, "^fg(" FG_AC ")^fg() %s", ssid);
 }
@@ -204,6 +287,7 @@ void print_status() {
 	char vol_str[50] = "", mem_str[50] = "", cpu_str[50] = "", temp_str[50] = "",
 			bat_str[50] = "", wifi_str[50] = "", date_str[50] = "";
 
+	volume(vol_str);
 	memory(mem_str);
 	cpu(cpu_str);
 	temperature(temp_str);
@@ -211,23 +295,28 @@ void print_status() {
 	wifi(wifi_str);
 	date(date_str);
 
-	sprintf(line, "%s" SEP "%s" SEP "%s" SEP "%s" SEP "%s" SEP "%s",
-			mem_str, cpu_str, temp_str, bat_str, wifi_str, date_str);
+	sprintf(line, "%s" SEP "%s" SEP "%s" SEP "%s" SEP "%s" SEP "%s" SEP "%s",
+			vol_str, mem_str, cpu_str, temp_str, bat_str, wifi_str, date_str);
 
 	printf("%s\n", line);
 	fflush(stdout);
 }
 
 int main() {
+	struct pa_connection connection;
 	struct timespec ts = {.tv_sec = 1, .tv_nsec = 0};
 
 	signal(SIGINT, handle_signals);
 	signal(SIGTERM, handle_signals);
 
+	initialize_pulse(&connection);
+
 	while (!stop_program) {
-		print_status();
 		nanosleep(&ts, NULL);
+		print_status();
 	}
+
+	cleanup_pulse(&connection);
 
 	return 0;
 }

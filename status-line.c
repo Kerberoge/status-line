@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
+#include <signal.h>
 #include <net/if.h>
 #include <linux/nl80211.h>
 #include <netlink/genl/genl.h>
@@ -14,6 +15,17 @@
 
 #define MB 1048576
 #define GB 1073741824
+
+struct cpu_usage {
+	unsigned int user, nice, system, idle, total;
+};
+
+int stop_program = 0;
+struct cpu_usage prev = {0, 0, 0, 0, 0};
+
+void handle_signals(int signal) {
+	stop_program = 1;
+}
 
 int startswith(char *a, char *b) {
 	return !strncmp(a, b, strlen(b));
@@ -43,12 +55,6 @@ void memory(char *buffer) {
 	else
 		sprintf(buffer, "^fg(" FG_AC ")^fg() %.1fG", (float) used / GB);
 }
-
-struct cpu_usage {
-	unsigned int user, nice, system, idle, total;
-};
-
-struct cpu_usage prev = {0, 0, 0, 0, 0};
 
 void cpu(char *buffer) {
 	FILE *stat_f = fopen("/proc/stat", "r");
@@ -193,29 +199,33 @@ void date(char *buffer) {
 			day, tm.tm_mday, tm.tm_mon + 1, tm.tm_hour, tm.tm_min);
 }
 
+void print_status() {
+	char line[300] = "";
+	char vol_str[50] = "", mem_str[50] = "", cpu_str[50] = "", temp_str[50] = "",
+			bat_str[50] = "", wifi_str[50] = "", date_str[50] = "";
+
+	memory(mem_str);
+	cpu(cpu_str);
+	temperature(temp_str);
+	battery(bat_str);
+	wifi(wifi_str);
+	date(date_str);
+
+	sprintf(line, "%s" SEP "%s" SEP "%s" SEP "%s" SEP "%s" SEP "%s",
+			mem_str, cpu_str, temp_str, bat_str, wifi_str, date_str);
+
+	printf("%s\n", line);
+	fflush(stdout);
+}
+
 int main() {
-	struct timespec ts;
-	ts.tv_sec = 1;
-	ts.tv_nsec = 0;
+	struct timespec ts = {.tv_sec = 1, .tv_nsec = 0};
 
-	for (;;) {
-		char line[300] = "";
-		char vol_str[50] = "", mem_str[50] = "", cpu_str[50] = "", temp_str[50] = "",
-				bat_str[50] = "", wifi_str[50] = "", date_str[50] = "";
+	signal(SIGINT, handle_signals);
+	signal(SIGTERM, handle_signals);
 
-		memory(mem_str);
-		cpu(cpu_str);
-		temperature(temp_str);
-		battery(bat_str);
-		wifi(wifi_str);
-		date(date_str);
-
-		sprintf(line, "%s" SEP "%s" SEP "%s" SEP "%s" SEP "%s" SEP "%s",
-				mem_str, cpu_str, temp_str, bat_str, wifi_str, date_str);
-
-		printf("%s\n", line);
-		fflush(stdout);
-
+	while (!stop_program) {
+		print_status();
 		nanosleep(&ts, NULL);
 	}
 

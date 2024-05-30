@@ -15,12 +15,6 @@
 #define MB 1048576
 #define GB 1073741824
 
-struct cpu_usage {
-	unsigned int user, nice, system, idle, total;
-};
-
-struct cpu_usage prev = {0, 0, 0, 0, 0};
-
 int startswith(char *a, char *b) {
 	return !strncmp(a, b, strlen(b));
 }
@@ -49,6 +43,12 @@ void memory(char *buffer) {
 	else
 		sprintf(buffer, "^fg(" FG_AC ")^fg() %.1fG", (float) used / GB);
 }
+
+struct cpu_usage {
+	unsigned int user, nice, system, idle, total;
+};
+
+struct cpu_usage prev = {0, 0, 0, 0, 0};
 
 void cpu(char *buffer) {
 	FILE *stat_f = fopen("/proc/stat", "r");

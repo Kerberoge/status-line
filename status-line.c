@@ -56,9 +56,6 @@ void cpu(char *buffer) {
 	unsigned int diff_idle, diff_total;
 	float usage;
 
-	if (!stat_f)
-		return;
-
 	fscanf(stat_f, "cpu  %u %u %u %u",
 			&curr.user, &curr.nice, &curr.system, &curr.idle);
 	fclose(stat_f);

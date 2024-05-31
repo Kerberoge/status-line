@@ -1,4 +1,4 @@
-#/bin/bash
+#!/bin/bash
 
 gcc status-line.c -o status-line \
 	-I/usr/include/libnl3 \

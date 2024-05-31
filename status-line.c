@@ -1,7 +1,8 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <time.h>
+#include <string.h>
 #include <signal.h>
+#include <time.h>
 #include <pthread.h>
 #include <pulse/pulseaudio.h>
 #include <net/if.h>

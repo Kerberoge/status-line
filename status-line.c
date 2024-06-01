@@ -10,11 +10,13 @@
 #include <netlink/genl/genl.h>
 #include <netlink/genl/ctrl.h>
 
-#define FG_AC "7a72b5"
-#define FG_UR "ff5050"
-#define SEP "     "
+#define FG_AC	"7a72b5"
+#define FG_UR	"ff5050"
+#define SEP		"     "
 
-#define WIFI_INTERFACE "wlo1"
+#define HWMON_PATH		"/sys/class/hwmon/hwmon3/temp1_input"
+#define BATTERY_PATH	"/sys/class/power_supply/BAT0"
+#define WIFI_DEVICE		"wlo1"
 
 #define MB 1048576
 #define GB 1073741824
@@ -166,7 +168,7 @@ void cpu(char *buffer) {
 }
 
 void temperature(char *buffer) {
-	FILE *temperature_f = fopen("/sys/class/hwmon/hwmon3/temp1_input", "r");
+	FILE *temperature_f = fopen(HWMON_PATH, "r");
 	int temperature;
 
 	if (!temperature_f) return;
@@ -183,8 +185,8 @@ void temperature(char *buffer) {
 }
 
 void battery(char *buffer) {
-	FILE *capacity_f = fopen("/sys/class/power_supply/BAT0/capacity", "r");
-	FILE *status_f = fopen("/sys/class/power_supply/BAT0/status", "r");
+	FILE *capacity_f = fopen(BATTERY_PATH "/capacity", "r");
+	FILE *status_f = fopen(BATTERY_PATH "/status", "r");
 	unsigned int capacity;
 	char status[20];
 
@@ -237,7 +239,7 @@ void wifi(char *buffer) {
 
 	genlmsg_put(msg, NL_AUTO_PID, NL_AUTO_SEQ, genl_ctrl_resolve(sk, "nl80211"),
 			0, 0, NL80211_CMD_GET_INTERFACE, 0);
-	nla_put_u32(msg, NL80211_ATTR_IFINDEX, if_nametoindex(WIFI_INTERFACE));
+	nla_put_u32(msg, NL80211_ATTR_IFINDEX, if_nametoindex(WIFI_DEVICE));
 
 	nl_socket_modify_cb(sk, NL_CB_VALID, NL_CB_CUSTOM, wifi_cb, &ssid);
 	nl_send_sync(sk, msg);

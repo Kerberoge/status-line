@@ -10,7 +10,7 @@
 #include <netlink/genl/genl.h>
 #include <netlink/genl/ctrl.h>
 
-#define FG_AC	"7a72b5"
+#define FG_AC	"7da5ff"
 #define FG_UR	"ff5050"
 #define SEP		"     "
 
@@ -111,9 +111,9 @@ void *pulse_worker(void *data) {
 
 void volume(char *buffer) {
 	if (audio_muted)
-		sprintf(buffer, "^fg(" FG_AC ")^fg() muted");
+		sprintf(buffer, "^fg(" FG_AC ")V^fg() muted");
 	else
-		sprintf(buffer, "^fg(" FG_AC ")^fg() %.0f%%",
+		sprintf(buffer, "^fg(" FG_AC ")V^fg() %.0f%%",
 				(float) audio_volume / PA_VOLUME_NORM * 100);
 }
 
@@ -122,11 +122,11 @@ void sleep(char *buffer) {
 
 	if (inhibit_sleep_f) {
 		fclose(inhibit_sleep_f);
-		sprintf(buffer, "^fg(" FG_AC ")^fg() on");
+		sprintf(buffer, "^fg(" FG_AC ")S^fg() on");
 		return;
 	}
 
-	sprintf(buffer, "^fg(" FG_AC ")^fg() off");
+	sprintf(buffer, "^fg(" FG_AC ")S^fg() off");
 }
 
 int startswith(char *a, char *b) {
@@ -153,9 +153,9 @@ void memory(char *buffer) {
 	used = memtotal - memavailable;
 
 	if (used < GB)
-		sprintf(buffer, "^fg(" FG_AC ")^fg() %.0fM", (float) used / MB);
+		sprintf(buffer, "^fg(" FG_AC ")M^fg() %.0fM", (float) used / MB);
 	else
-		sprintf(buffer, "^fg(" FG_AC ")^fg() %.1fG", (float) used / GB);
+		sprintf(buffer, "^fg(" FG_AC ")M^fg() %.1fG", (float) used / GB);
 }
 
 void cpu(char *buffer) {
@@ -175,9 +175,9 @@ void cpu(char *buffer) {
 	usage = (float) (diff_total - diff_idle) / (diff_total + 1) * 100;
 
 	if (usage >= 90)
-		sprintf(buffer, "^fg(" FG_AC ")^fg() ^fg(" FG_UR ")%02.0f%%^fg()", usage);
+		sprintf(buffer, "^fg(" FG_AC ")C^fg() ^fg(" FG_UR ")%02.0f%%^fg()", usage);
 	else
-		sprintf(buffer, "^fg(" FG_AC ")^fg() %02.0f%%", usage);
+		sprintf(buffer, "^fg(" FG_AC ")C^fg() %02.0f%%", usage);
 }
 
 void temperature(char *buffer) {
@@ -192,9 +192,9 @@ void temperature(char *buffer) {
 	temperature /= 1000;
 
 	if (temperature >= 70)
-		sprintf(buffer, "^fg(" FG_AC ")^fg() ^fg(" FG_UR ")%d°C^fg()", temperature);
+		sprintf(buffer, "^fg(" FG_AC ")T^fg() ^fg(" FG_UR ")%d°C^fg()", temperature);
 	else
-		sprintf(buffer, "^fg(" FG_AC ")^fg() %d°C", temperature);
+		sprintf(buffer, "^fg(" FG_AC ")T^fg() %d°C", temperature);
 }
 
 void battery(char *buffer) {
@@ -211,11 +211,11 @@ void battery(char *buffer) {
 	fclose(status_f);
 
 	if (strcmp(status, "Charging") == 0)
-		sprintf(buffer, "^fg(" FG_AC ") ^fg() %u%%", capacity);
+		sprintf(buffer, "^fg(" FG_AC ")B (ch)^fg() %u%%", capacity);
 	else if (capacity <= 10)
-		sprintf(buffer, "^fg(" FG_AC ")^fg() ^fg(" FG_UR ")%u%%^fg()", capacity);
+		sprintf(buffer, "^fg(" FG_AC ")B^fg() ^fg(" FG_UR ")%u%%^fg()", capacity);
 	else
-		sprintf(buffer, "^fg(" FG_AC ")^fg() %u%%", capacity);
+		sprintf(buffer, "^fg(" FG_AC ")B^fg() %u%%", capacity);
 }
 
 int wifi_cb(struct nl_msg *msg, void *data) {
@@ -261,7 +261,7 @@ void wifi(char *buffer) {
 
 	if (!ssid) return;
 
-	sprintf(buffer, "^fg(" FG_AC ")^fg() %s", ssid);
+	sprintf(buffer, "^fg(" FG_AC ")W^fg() %s", ssid);
 }
 
 void date(char *buffer) {
@@ -293,8 +293,7 @@ void date(char *buffer) {
 			break;
 	}
 
-	sprintf(buffer, "^fg(" FG_AC ")^fg() %s %02d-%02d" SEP \
-			"^fg(" FG_AC ")^fg() %d:%02d",
+	sprintf(buffer, "^fg(" FG_AC ")D^fg() %s %02d-%02d   %d:%02d",
 			day, tm.tm_mday, tm.tm_mon + 1, tm.tm_hour, tm.tm_min);
 }
 

@@ -14,7 +14,7 @@
 #define FG_UR	"ff5050"
 #define SEP		"     "
 
-#define HWMON_PATH		"/sys/class/hwmon/hwmon3/temp1_input"
+#define HWMON_PATH		"/sys/class/hwmon/hwmon2/temp1_input"
 #define BATTERY_PATH	"/sys/class/power_supply/BAT0"
 #define WIFI_DEVICE		"wlo1"
 
@@ -40,6 +40,7 @@ void initialize_pulse(struct pa_connection *con);
 void cleanup_pulse(struct pa_connection *con);
 void *pulse_worker(void *data);
 void volume(char *buffer);
+void sleep(char *buffer);
 int startswith(char *a, char *b);
 void memory(char *buffer);
 void cpu(char *buffer);
@@ -114,6 +115,18 @@ void volume(char *buffer) {
 	else
 		sprintf(buffer, "^fg(" FG_AC ")^fg() %.0f%%",
 				(float) audio_volume / PA_VOLUME_NORM * 100);
+}
+
+void sleep(char *buffer) {
+	FILE *inhibit_sleep_f = fopen("/tmp/inhibit_sleep", "r");
+
+	if (inhibit_sleep_f) {
+		fclose(inhibit_sleep_f);
+		sprintf(buffer, "^fg(" FG_AC ")^fg() on");
+		return;
+	}
+
+	sprintf(buffer, "^fg(" FG_AC ")^fg() off");
 }
 
 int startswith(char *a, char *b) {
@@ -287,10 +300,12 @@ void date(char *buffer) {
 
 void print_status() {
 	char line[300] = "";
-	char vol_str[50] = "", mem_str[50] = "", cpu_str[50] = "", temp_str[50] = "",
-			bat_str[50] = "", wifi_str[50] = "", date_str[50] = "";
+	char vol_str[50] = "", slp_str[50] = "", mem_str[50] = "",
+			cpu_str[50] = "", temp_str[50] = "", bat_str[50] = "",
+			wifi_str[50] = "", date_str[50] = "";
 
 	volume(vol_str);
+	sleep(slp_str);
 	memory(mem_str);
 	cpu(cpu_str);
 	temperature(temp_str);
@@ -298,8 +313,8 @@ void print_status() {
 	wifi(wifi_str);
 	date(date_str);
 
-	sprintf(line, "%s" SEP "%s" SEP "%s" SEP "%s" SEP "%s" SEP "%s" SEP "%s",
-			vol_str, mem_str, cpu_str, temp_str, bat_str, wifi_str, date_str);
+	sprintf(line, "%s" SEP "%s" SEP "%s" SEP "%s" SEP "%s" SEP "%s" SEP "%s" SEP "%s",
+			vol_str, slp_str, mem_str, cpu_str, temp_str, bat_str, wifi_str, date_str);
 
 	printf("%s\n", line);
 	fflush(stdout);

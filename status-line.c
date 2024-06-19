@@ -16,7 +16,7 @@
 
 #define HWMON_PATH		"/sys/class/hwmon/hwmon2/temp1_input"
 #define BATTERY_PATH	"/sys/class/power_supply/BAT0"
-#define WIFI_DEVICE		"wlo1"
+#define WIFI_DEVICE		"wlp3s0"
 
 #define MB 1048576
 #define GB 1073741824

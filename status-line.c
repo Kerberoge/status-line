@@ -1,13 +1,13 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>
 #include <string.h>
 #include <signal.h>
 #include <time.h>
+#include <unistd.h>				// for setup_dwlb() and cleanup_dwlb()
+#include <sys/wait.h>			// for wait() in cleanup_dwlb()
+#include <pulse/pulseaudio.h>	// next 2 are for the volume module
 #include <pthread.h>
-#include <sys/wait.h>
-#include <pulse/pulseaudio.h>
-#include <net/if.h>
+#include <net/if.h>				// next 4 are for the wifi module
 #include <linux/nl80211.h>
 #include <netlink/genl/genl.h>
 #include <netlink/genl/ctrl.h>

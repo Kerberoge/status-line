@@ -1,9 +1,11 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
 #include <string.h>
 #include <signal.h>
 #include <time.h>
 #include <pthread.h>
+#include <sys/wait.h>
 #include <pulse/pulseaudio.h>
 #include <net/if.h>
 #include <linux/nl80211.h>
@@ -33,14 +35,16 @@ struct cpu_usage {
 };
 
 void handle_signals(int signal);
+void setup_pulse(void);
+void setup_dwlb(void);
+void cleanup_pulse(void);
+void cleanup_dwlb(void);
 void update_volume_cb(pa_context *c, const pa_sink_info *info, int eol, void *data);
 void subscribe_cb(pa_context *c, pa_subscription_event_type_t t, uint32_t i, void *data);
 void context_state_cb(pa_context *c, void *data);
-void initialize_pulse(struct pa_connection *con);
-void cleanup_pulse(struct pa_connection *con);
 void *pulse_worker(void *data);
 void volume(char *buffer);
-void sleep(char *buffer);
+void sleep_state(char *buffer);
 int startswith(char *a, char *b);
 void memory(char *buffer);
 void cpu(char *buffer);
@@ -49,14 +53,60 @@ void battery(char *buffer);
 int wifi_cb(struct nl_msg *msg, void *data);
 void wifi(char *buffer);
 void date(char *buffer);
-void print_status();
+void write_status(void);
 
 int stop_program = 0;
+int dwlb_pipe[2];
+struct pa_connection *pa_con;
 int audio_volume = 0, audio_muted = 0;
 struct cpu_usage prev = {0, 0, 0, 0, 0};
 
 void handle_signals(int signal) {
 	stop_program = 1;
+}
+
+void setup_pulse(void) {
+	pa_con = malloc(sizeof(struct pa_connection));
+	pa_con->mainloop = pa_mainloop_new();
+	pa_con->api = pa_mainloop_get_api(pa_con->mainloop);
+	pa_con->context = pa_context_new(pa_con->api, "status-line");
+
+	pa_context_set_state_callback(pa_con->context, context_state_cb, pa_con);
+	pa_context_connect(pa_con->context, NULL, PA_CONTEXT_NOFLAGS, NULL);
+
+	pthread_create(&pa_con->thread, NULL, pulse_worker, pa_con);
+}
+
+void setup_dwlb(void) {
+	pid_t p;
+
+	pipe(dwlb_pipe);
+	p = fork();
+
+	if (p > 0) {
+		/* Parent */
+		close(dwlb_pipe[0]);
+	} else if (p == 0) {
+		/* Child */
+		close(dwlb_pipe[1]);
+		dup2(dwlb_pipe[0], STDIN_FILENO);
+		close(dwlb_pipe[0]);
+		execlp("dwlb", "dwlb", "-status-stdin", "all", NULL);
+	}
+}
+
+void cleanup_pulse(void) {
+	pa_mainloop_quit(pa_con->mainloop, 0);
+	pa_context_disconnect(pa_con->context);
+	pa_context_unref(pa_con->context);
+	pa_mainloop_free(pa_con->mainloop);
+
+	pthread_join(pa_con->thread, NULL);
+}
+
+void cleanup_dwlb(void) {
+	close(dwlb_pipe[1]);
+	wait(NULL);
 }
 
 void update_volume_cb(pa_context *c, const pa_sink_info *info, int eol, void *data) {
@@ -65,7 +115,7 @@ void update_volume_cb(pa_context *c, const pa_sink_info *info, int eol, void *da
 	audio_volume = pa_cvolume_avg(&info->volume);
 	audio_muted = info->mute;
 
-	print_status();
+	write_status();
 }
 
 void subscribe_cb(pa_context *c, pa_subscription_event_type_t t, uint32_t i, void *data) {
@@ -80,26 +130,6 @@ void context_state_cb(pa_context *c, void *data) {
 		pa_context_set_subscribe_callback(con->context, subscribe_cb, NULL);
 		pa_context_subscribe(con->context, PA_SUBSCRIPTION_MASK_SINK, NULL, NULL);
 	}
-}
-
-void initialize_pulse(struct pa_connection *con) {
-	con->mainloop = pa_mainloop_new();
-	con->api = pa_mainloop_get_api(con->mainloop);
-	con->context = pa_context_new(con->api, "status-line");
-
-	pa_context_set_state_callback(con->context, context_state_cb, con);
-	pa_context_connect(con->context, NULL, PA_CONTEXT_NOFLAGS, NULL);
-
-	pthread_create(&con->thread, NULL, pulse_worker, con);
-}
-
-void cleanup_pulse(struct pa_connection *con) {
-	pa_mainloop_quit(con->mainloop, 0);
-	pa_context_disconnect(con->context);
-	pa_context_unref(con->context);
-	pa_mainloop_free(con->mainloop);
-
-	pthread_join(con->thread, NULL);
 }
 
 void *pulse_worker(void *data) {
@@ -117,7 +147,7 @@ void volume(char *buffer) {
 				(float) audio_volume / PA_VOLUME_NORM * 100);
 }
 
-void sleep(char *buffer) {
+void sleep_state(char *buffer) {
 	FILE *inhibit_sleep_f = fopen("/tmp/inhibit_sleep", "r");
 
 	if (inhibit_sleep_f) {
@@ -298,14 +328,14 @@ void date(char *buffer) {
 			day, tm.tm_mday, tm.tm_mon + 1, tm.tm_hour, tm.tm_min);
 }
 
-void print_status() {
+void write_status(void) {
 	char line[300] = "";
 	char vol_str[50] = "", slp_str[50] = "", mem_str[50] = "",
 			cpu_str[50] = "", temp_str[50] = "", bat_str[50] = "",
 			wifi_str[50] = "", date_str[50] = "";
 
 	volume(vol_str);
-	sleep(slp_str);
+	sleep_state(slp_str);
 	memory(mem_str);
 	cpu(cpu_str);
 	temperature(temp_str);
@@ -313,28 +343,28 @@ void print_status() {
 	wifi(wifi_str);
 	date(date_str);
 
-	sprintf(line, "%s" SEP "%s" SEP "%s" SEP "%s" SEP "%s" SEP "%s" SEP "%s" SEP "%s",
+	sprintf(line, "%s" SEP "%s" SEP "%s" SEP "%s" SEP "%s" SEP "%s" SEP "%s" SEP "%s\n",
 			vol_str, slp_str, mem_str, cpu_str, temp_str, bat_str, wifi_str, date_str);
 
-	printf("%s\n", line);
-	fflush(stdout);
+	write(dwlb_pipe[1], line, strlen(line));
 }
 
 int main() {
-	struct pa_connection connection;
 	struct timespec ts = {.tv_sec = 1, .tv_nsec = 0};
 
 	signal(SIGINT, handle_signals);
 	signal(SIGTERM, handle_signals);
 
-	initialize_pulse(&connection);
+	setup_pulse();
+	setup_dwlb();
 
 	while (!stop_program) {
 		nanosleep(&ts, NULL);
-		print_status();
+		write_status();
 	}
 
-	cleanup_pulse(&connection);
+	cleanup_pulse();
+	cleanup_dwlb();
 
 	return 0;
 }

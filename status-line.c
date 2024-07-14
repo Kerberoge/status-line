@@ -2,7 +2,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <signal.h>
-#include <time.h>
 #include <unistd.h>				/* for setup_dwlb() and cleanup_dwlb() */
 #include <sys/wait.h>			/* for wait() in cleanup_dwlb() */
 #include <pulse/pulseaudio.h>	/* next 2 are for the volume module */
@@ -25,9 +24,10 @@
 
 struct pa_connection {
 	pa_mainloop *mainloop;
-	pa_mainloop_api *api;
+	pa_mainloop_api *mainloop_api;
 	pa_context *context;
 	pthread_t thread;
+	int failed;
 };
 
 struct cpu_usage {
@@ -35,14 +35,14 @@ struct cpu_usage {
 };
 
 void handle_signals(int signal);
-void setup_pulse(void);
 void setup_dwlb(void);
-void cleanup_pulse(void);
 void cleanup_dwlb(void);
+void setup_pulse(void);
+void cleanup_pulse(void);
+void *pulse_worker(void *data);
+void context_state_cb(pa_context *c, void *data);
 void update_volume_cb(pa_context *c, const pa_sink_info *info, int eol, void *data);
 void subscribe_cb(pa_context *c, pa_subscription_event_type_t t, uint32_t i, void *data);
-void context_state_cb(pa_context *c, void *data);
-void *pulse_worker(void *data);
 void volume(char *buffer);
 void sleep_state(char *buffer);
 int startswith(char *a, char *b);
@@ -57,24 +57,12 @@ void write_status(void);
 
 int stop_program = 0;
 int dwlb_pipe[2];
-struct pa_connection *pa_con;
+struct pa_connection pa_con;
 int audio_volume = 0, audio_muted = 0;
 struct cpu_usage prev = {0, 0, 0, 0, 0};
 
 void handle_signals(int signal) {
 	stop_program = 1;
-}
-
-void setup_pulse(void) {
-	pa_con = malloc(sizeof(struct pa_connection));
-	pa_con->mainloop = pa_mainloop_new();
-	pa_con->api = pa_mainloop_get_api(pa_con->mainloop);
-	pa_con->context = pa_context_new(pa_con->api, "status-line");
-
-	pa_context_set_state_callback(pa_con->context, context_state_cb, pa_con);
-	pa_context_connect(pa_con->context, NULL, PA_CONTEXT_NOFLAGS, NULL);
-
-	pthread_create(&pa_con->thread, NULL, pulse_worker, pa_con);
 }
 
 void setup_dwlb(void) {
@@ -95,18 +83,61 @@ void setup_dwlb(void) {
 	}
 }
 
-void cleanup_pulse(void) {
-	pa_mainloop_quit(pa_con->mainloop, 0);
-	pa_context_disconnect(pa_con->context);
-	pa_context_unref(pa_con->context);
-	pa_mainloop_free(pa_con->mainloop);
-
-	pthread_join(pa_con->thread, NULL);
-}
-
 void cleanup_dwlb(void) {
 	close(dwlb_pipe[1]);
 	wait(NULL);
+}
+
+void setup_pulse(void) {
+	pa_con.mainloop = pa_mainloop_new();
+	pa_con.mainloop_api = pa_mainloop_get_api(pa_con.mainloop);
+
+	do {
+		if (pa_con.context)
+			pa_context_unref(pa_con.context);
+
+		pa_con.context = pa_context_new(pa_con.mainloop_api, "status-line");
+		pa_context_set_state_callback(pa_con.context, context_state_cb, NULL);
+		pa_context_connect(pa_con.context, NULL, PA_CONTEXT_NOFLAGS, NULL);
+	} while (pa_con.failed && !stop_program);
+			
+	pthread_create(&pa_con.thread, NULL, pulse_worker, NULL);
+}
+
+void cleanup_pulse(void) {
+	pa_mainloop_quit(pa_con.mainloop, 0);
+	pthread_join(pa_con.thread, NULL);
+	pa_context_disconnect(pa_con.context);
+	pa_context_unref(pa_con.context);
+	pa_mainloop_free(pa_con.mainloop);
+}
+
+void *pulse_worker(void *data) {
+	pa_mainloop_run(pa_con.mainloop, NULL);
+
+	return NULL;
+}
+
+void context_state_cb(pa_context *c, void *data) {
+	switch (pa_context_get_state(c)) {
+		case PA_CONTEXT_READY:
+			// Correct volume should be displayed even when no event is received
+			pa_context_get_sink_info_by_name(c, "@DEFAULT_SINK@", update_volume_cb, NULL);
+
+			pa_context_set_subscribe_callback(pa_con.context, subscribe_cb, NULL);
+			pa_context_subscribe(pa_con.context, PA_SUBSCRIPTION_MASK_SINK, NULL, NULL);
+			break;
+		case PA_CONTEXT_CONNECTING:
+			pa_con.failed = 0;
+			break;
+		case PA_CONTEXT_FAILED:
+			pa_con.failed = 1;
+			break;
+	}
+}
+
+void subscribe_cb(pa_context *c, pa_subscription_event_type_t t, uint32_t i, void *data) {
+	pa_context_get_sink_info_by_name(c, "@DEFAULT_SINK@", update_volume_cb, NULL);
 }
 
 void update_volume_cb(pa_context *c, const pa_sink_info *info, int eol, void *data) {
@@ -116,27 +147,6 @@ void update_volume_cb(pa_context *c, const pa_sink_info *info, int eol, void *da
 	audio_muted = info->mute;
 
 	write_status();
-}
-
-void subscribe_cb(pa_context *c, pa_subscription_event_type_t t, uint32_t i, void *data) {
-	pa_context_get_sink_info_by_name(c, "@DEFAULT_SINK@", update_volume_cb, NULL);
-}
-
-void context_state_cb(pa_context *c, void *data) {
-	struct pa_connection *con = data;
-	if (pa_context_get_state(c) == PA_CONTEXT_READY) {
-		pa_context_get_sink_info_by_name(c, "@DEFAULT_SINK@", update_volume_cb, NULL);
-
-		pa_context_set_subscribe_callback(con->context, subscribe_cb, NULL);
-		pa_context_subscribe(con->context, PA_SUBSCRIPTION_MASK_SINK, NULL, NULL);
-	}
-}
-
-void *pulse_worker(void *data) {
-	struct pa_connection *con = data;
-	pa_mainloop_run(con->mainloop, NULL);
-
-	return NULL;
 }
 
 void volume(char *buffer) {
@@ -350,17 +360,15 @@ void write_status(void) {
 }
 
 int main() {
-	struct timespec ts = {.tv_sec = 1, .tv_nsec = 0};
-
 	signal(SIGINT, handle_signals);
 	signal(SIGTERM, handle_signals);
 
-	setup_pulse();
 	setup_dwlb();
+	setup_pulse();
 
 	while (!stop_program) {
-		nanosleep(&ts, NULL);
 		write_status();
+		sleep(1);
 	}
 
 	cleanup_pulse();

@@ -3,6 +3,7 @@
 #include <string.h>
 #include <signal.h>
 #include <unistd.h>				/* for setup_dwlb() and cleanup_dwlb() */
+#include <time.h>				/* for nanosleep() */
 #include <sys/wait.h>			/* for wait() in cleanup_dwlb() */
 #include <pulse/pulseaudio.h>	/* next 2 are for the volume module */
 #include <pthread.h>
@@ -11,7 +12,7 @@
 #include <netlink/genl/genl.h>
 #include <netlink/genl/ctrl.h>
 
-#define FG_AC	"7a72b5"
+#define FG_AC	"337a57"
 #define FG_UR	"ff5050"
 #define SEP		"     "
 
@@ -28,6 +29,7 @@ struct pa_connection {
 	pa_context *context;
 	pthread_t thread;
 	int failed;
+	int try_count;
 };
 
 struct cpu_usage {
@@ -39,6 +41,7 @@ void setup_dwlb(void);
 void cleanup_dwlb(void);
 void setup_pulse(void);
 void cleanup_pulse(void);
+void create_pulse_context(void);
 void *pulse_worker(void *data);
 void context_state_cb(pa_context *c, void *data);
 void update_volume_cb(pa_context *c, const pa_sink_info *info, int eol, void *data);
@@ -57,7 +60,7 @@ void write_status(void);
 
 int stop_program = 0;
 int dwlb_pipe[2];
-struct pa_connection pa_con;
+struct pa_connection pa_con = {.try_count = 0};
 int audio_volume = 0, audio_muted = 0;
 struct cpu_usage prev = {0, 0, 0, 0, 0};
 
@@ -89,31 +92,41 @@ void cleanup_dwlb(void) {
 }
 
 void setup_pulse(void) {
-	pa_con.mainloop = pa_mainloop_new();
-	pa_con.mainloop_api = pa_mainloop_get_api(pa_con.mainloop);
-
-	do {
-		if (pa_con.context)
-			pa_context_unref(pa_con.context);
-
-		pa_con.context = pa_context_new(pa_con.mainloop_api, "status-line");
-		pa_context_set_state_callback(pa_con.context, context_state_cb, NULL);
-		pa_context_connect(pa_con.context, NULL, PA_CONTEXT_NOFLAGS, NULL);
-	} while (pa_con.failed && !stop_program);
-			
 	pthread_create(&pa_con.thread, NULL, pulse_worker, NULL);
 }
 
 void cleanup_pulse(void) {
 	pa_mainloop_quit(pa_con.mainloop, 0);
 	pthread_join(pa_con.thread, NULL);
-	pa_context_disconnect(pa_con.context);
-	pa_context_unref(pa_con.context);
-	pa_mainloop_free(pa_con.mainloop);
+}
+
+void create_pulse_context(void) {
+	pa_con.context = pa_context_new(pa_con.mainloop_api, "status-line");
+	pa_context_set_state_callback(pa_con.context, context_state_cb, NULL);
+	pa_context_connect(pa_con.context, NULL, PA_CONTEXT_NOFLAGS, NULL);
+	
+	pa_con.try_count++;
 }
 
 void *pulse_worker(void *data) {
+	struct timespec retry_interval = {.tv_sec = 0, .tv_nsec = 100000000}; // 0.1s
+
+	pa_con.mainloop = pa_mainloop_new();
+	pa_con.mainloop_api = pa_mainloop_get_api(pa_con.mainloop);
+
+	create_pulse_context();
+	while (pa_con.failed && !stop_program) {
+		pa_con.failed = 0;
+		pa_context_unref(pa_con.context);
+		nanosleep(&retry_interval, NULL);
+		create_pulse_context();
+	}
+
 	pa_mainloop_run(pa_con.mainloop, NULL);
+	
+	pa_context_disconnect(pa_con.context);
+	pa_context_unref(pa_con.context);
+	pa_mainloop_free(pa_con.mainloop);
 
 	return NULL;
 }
@@ -126,9 +139,6 @@ void context_state_cb(pa_context *c, void *data) {
 
 			pa_context_set_subscribe_callback(pa_con.context, subscribe_cb, NULL);
 			pa_context_subscribe(pa_con.context, PA_SUBSCRIPTION_MASK_SINK, NULL, NULL);
-			break;
-		case PA_CONTEXT_CONNECTING:
-			pa_con.failed = 0;
 			break;
 		case PA_CONTEXT_FAILED:
 			pa_con.failed = 1;
@@ -150,9 +160,10 @@ void update_volume_cb(pa_context *c, const pa_sink_info *info, int eol, void *da
 }
 
 void volume(char *buffer) {
-	if (audio_muted)
-		sprintf(buffer, "^fg(" FG_AC ")^fg() muted");
-	else
+	if (audio_muted) {
+		sprintf(buffer, "%d %s", pa_con.try_count, pa_con.try_count == 1 ? "try" : "tries");
+		sprintf(buffer, "%s    ^fg(" FG_AC ")^fg() muted", buffer);
+	} else
 		sprintf(buffer, "^fg(" FG_AC ")^fg() %.0f%%",
 				(float) audio_volume / PA_VOLUME_NORM * 100);
 }
@@ -339,10 +350,10 @@ void date(char *buffer) {
 }
 
 void write_status(void) {
-	char line[300] = "";
+	char line[400] = "";
 	char vol_str[50] = "", slp_str[50] = "", mem_str[50] = "",
 			cpu_str[50] = "", temp_str[50] = "", bat_str[50] = "",
-			wifi_str[50] = "", date_str[50] = "";
+			wifi_str[50] = "", date_str[100] = "";
 
 	volume(vol_str);
 	sleep_state(slp_str);
@@ -360,6 +371,8 @@ void write_status(void) {
 }
 
 int main() {
+	struct timespec write_interval = {.tv_sec = 1, .tv_nsec = 0};
+
 	signal(SIGINT, handle_signals);
 	signal(SIGTERM, handle_signals);
 
@@ -368,7 +381,7 @@ int main() {
 
 	while (!stop_program) {
 		write_status();
-		sleep(1);
+		nanosleep(&write_interval, NULL);
 	}
 
 	cleanup_pulse();

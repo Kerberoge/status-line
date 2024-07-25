@@ -2,9 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <signal.h>
-#include <unistd.h>				/* for setup_dwlb() and cleanup_dwlb() */
 #include <time.h>				/* for nanosleep() */
-#include <sys/wait.h>			/* for wait() in cleanup_dwlb() */
 #include <pulse/pulseaudio.h>	/* next 2 are for the volume module */
 #include <pthread.h>
 #include <net/if.h>				/* next 4 are for the wifi module */
@@ -37,8 +35,6 @@ struct cpu_usage {
 };
 
 void handle_signals(int signal);
-void setup_dwlb(void);
-void cleanup_dwlb(void);
 void setup_pulse(void);
 void cleanup_pulse(void);
 void create_pulse_context(void);
@@ -56,7 +52,7 @@ void battery(char *buffer);
 int wifi_cb(struct nl_msg *msg, void *data);
 void wifi(char *buffer);
 void date(char *buffer);
-void write_status(void);
+void print_status(void);
 
 int stop_program = 0;
 int dwlb_pipe[2];
@@ -66,29 +62,6 @@ struct cpu_usage prev = {0, 0, 0, 0, 0};
 
 void handle_signals(int signal) {
 	stop_program = 1;
-}
-
-void setup_dwlb(void) {
-	pid_t p;
-
-	pipe(dwlb_pipe);
-	p = fork();
-
-	if (p > 0) {
-		/* Parent */
-		close(dwlb_pipe[0]);
-	} else if (p == 0) {
-		/* Child */
-		close(dwlb_pipe[1]);
-		dup2(dwlb_pipe[0], STDIN_FILENO);
-		close(dwlb_pipe[0]);
-		execlp("dwlb", "dwlb", "-status-stdin", "all", NULL);
-	}
-}
-
-void cleanup_dwlb(void) {
-	close(dwlb_pipe[1]);
-	wait(NULL);
 }
 
 void setup_pulse(void) {
@@ -156,7 +129,7 @@ void update_volume_cb(pa_context *c, const pa_sink_info *info, int eol, void *da
 	audio_volume = pa_cvolume_avg(&info->volume);
 	audio_muted = info->mute;
 
-	write_status();
+	print_status();
 }
 
 void volume(char *buffer) {
@@ -349,7 +322,7 @@ void date(char *buffer) {
 			day, tm.tm_mday, tm.tm_mon + 1, tm.tm_hour, tm.tm_min);
 }
 
-void write_status(void) {
+void print_status(void) {
 	char line[400] = "";
 	char vol_str[50] = "", slp_str[50] = "", mem_str[50] = "",
 			cpu_str[50] = "", temp_str[50] = "", bat_str[50] = "",
@@ -364,10 +337,11 @@ void write_status(void) {
 	wifi(wifi_str);
 	date(date_str);
 
-	sprintf(line, "%s" SEP "%s" SEP "%s" SEP "%s" SEP "%s" SEP "%s" SEP "%s" SEP "%s\n",
+	sprintf(line, "%s" SEP "%s" SEP "%s" SEP "%s" SEP "%s" SEP "%s" SEP "%s" SEP "%s",
 			vol_str, slp_str, mem_str, cpu_str, temp_str, bat_str, wifi_str, date_str);
 
-	write(dwlb_pipe[1], line, strlen(line));
+	printf("%s\n", line);
+	fflush(stdout);
 }
 
 int main() {
@@ -376,16 +350,14 @@ int main() {
 	signal(SIGINT, handle_signals);
 	signal(SIGTERM, handle_signals);
 
-	setup_dwlb();
 	setup_pulse();
 
 	while (!stop_program) {
-		write_status();
+		print_status();
 		nanosleep(&write_interval, NULL);
 	}
 
 	cleanup_pulse();
-	cleanup_dwlb();
 
 	return 0;
 }

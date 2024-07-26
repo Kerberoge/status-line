@@ -82,18 +82,19 @@ void create_pulse_context(void) {
 }
 
 void *pulse_worker(void *data) {
-	struct timespec retry_interval = {.tv_sec = 0, .tv_nsec = 100000000}; // 0.1s
+	struct timespec retry_interval = {.tv_sec = 0, .tv_nsec = 200000000}; // 0.2s
 
 	pa_con.mainloop = pa_mainloop_new();
 	pa_con.mainloop_api = pa_mainloop_get_api(pa_con.mainloop);
 
-	create_pulse_context();
-	while (pa_con.failed && !stop_program) {
+	do {
 		pa_con.failed = 0;
-		pa_context_unref(pa_con.context);
+		if (pa_con.context)
+			pa_context_unref(pa_con.context);
+		// Also sleep before the first try, since dwl needs to load pipewire first
 		nanosleep(&retry_interval, NULL);
 		create_pulse_context();
-	}
+	} while (pa_con.failed && !stop_program);
 
 	pa_mainloop_run(pa_con.mainloop, NULL);
 	

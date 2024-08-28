@@ -338,10 +338,10 @@ void date(char *buffer) {
 }
 
 void write_status(void) {
-	char line[300] = "";
+	char line[400] = "";
 	char vol_str[50] = "", slp_str[50] = "", mem_str[50] = "",
 			cpu_str[50] = "", temp_str[50] = "", bat_str[50] = "",
-			wifi_str[50] = "", date_str[50] = "";
+			wifi_str[50] = "", date_str[100] = "";
 
 	volume(vol_str);
 	sleep_state(slp_str);

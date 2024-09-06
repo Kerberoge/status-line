@@ -36,6 +36,7 @@ struct cpu_usage {
 void handle_signals(int signal);
 void setup_pulse(void);
 void cleanup_pulse(void);
+void create_pulse_context(void);
 void *pulse_worker(void *data);
 void context_state_cb(pa_context *c, void *data);
 void update_volume_cb(pa_context *c, const pa_sink_info *info, int eol, void *data);
@@ -62,31 +63,40 @@ void handle_signals(int signal) {
 }
 
 void setup_pulse(void) {
-	pa_con.mainloop = pa_mainloop_new();
-	pa_con.mainloop_api = pa_mainloop_get_api(pa_con.mainloop);
-
-	do {
-		if (pa_con.context)
-			pa_context_unref(pa_con.context);
-
-		pa_con.context = pa_context_new(pa_con.mainloop_api, "status-line");
-		pa_context_set_state_callback(pa_con.context, context_state_cb, NULL);
-		pa_context_connect(pa_con.context, NULL, PA_CONTEXT_NOFLAGS, NULL);
-	} while (pa_con.failed && !stop_program);
-			
 	pthread_create(&pa_con.thread, NULL, pulse_worker, NULL);
 }
 
 void cleanup_pulse(void) {
 	pa_mainloop_quit(pa_con.mainloop, 0);
 	pthread_join(pa_con.thread, NULL);
-	pa_context_disconnect(pa_con.context);
-	pa_context_unref(pa_con.context);
-	pa_mainloop_free(pa_con.mainloop);
+}
+
+void create_pulse_context(void) {
+	pa_con.context = pa_context_new(pa_con.mainloop_api, "status-line");
+	pa_context_set_state_callback(pa_con.context, context_state_cb, NULL);
+	pa_context_connect(pa_con.context, NULL, PA_CONTEXT_NOFLAGS, NULL);
 }
 
 void *pulse_worker(void *data) {
+	struct timespec retry_interval = {.tv_sec = 0, .tv_nsec = 200000000};
+
+	pa_con.mainloop = pa_mainloop_new();
+	pa_con.mainloop_api = pa_mainloop_get_api(pa_con.mainloop);
+
+	nanosleep(&retry_interval, NULL);
+	create_pulse_context();
+	while (pa_con.failed && !stop_program) {
+		pa_con.failed = 0;
+		pa_context_unref(pa_con.context);
+		nanosleep(&retry_interval, NULL);
+		create_pulse_context();
+	}
+
 	pa_mainloop_run(pa_con.mainloop, NULL);
+	
+	pa_context_disconnect(pa_con.context);
+	pa_context_unref(pa_con.context);
+	pa_mainloop_free(pa_con.mainloop);
 
 	return NULL;
 }
@@ -99,9 +109,6 @@ void context_state_cb(pa_context *c, void *data) {
 
 			pa_context_set_subscribe_callback(pa_con.context, subscribe_cb, NULL);
 			pa_context_subscribe(pa_con.context, PA_SUBSCRIPTION_MASK_SINK, NULL, NULL);
-			break;
-		case PA_CONTEXT_CONNECTING:
-			pa_con.failed = 0;
 			break;
 		case PA_CONTEXT_FAILED:
 			pa_con.failed = 1;

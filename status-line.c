@@ -27,7 +27,6 @@ struct pa_connection {
 	pa_context *context;
 	pthread_t thread;
 	int failed;
-	int try_count;
 };
 
 struct cpu_usage {
@@ -55,8 +54,7 @@ void date(char *buffer);
 void print_status(void);
 
 int stop_program = 0;
-int dwlb_pipe[2];
-struct pa_connection pa_con = {.try_count = 0};
+struct pa_connection pa_con;
 int audio_volume = 0, audio_muted = 0;
 struct cpu_usage prev = {0, 0, 0, 0, 0};
 
@@ -77,24 +75,22 @@ void create_pulse_context(void) {
 	pa_con.context = pa_context_new(pa_con.mainloop_api, "status-line");
 	pa_context_set_state_callback(pa_con.context, context_state_cb, NULL);
 	pa_context_connect(pa_con.context, NULL, PA_CONTEXT_NOFLAGS, NULL);
-	
-	pa_con.try_count++;
 }
 
 void *pulse_worker(void *data) {
-	struct timespec retry_interval = {.tv_sec = 0, .tv_nsec = 200000000}; // 0.2s
+	struct timespec retry_interval = {.tv_sec = 0, .tv_nsec = 200000000};
 
 	pa_con.mainloop = pa_mainloop_new();
 	pa_con.mainloop_api = pa_mainloop_get_api(pa_con.mainloop);
 
-	do {
+	nanosleep(&retry_interval, NULL);
+	create_pulse_context();
+	while (pa_con.failed && !stop_program) {
 		pa_con.failed = 0;
-		if (pa_con.context)
-			pa_context_unref(pa_con.context);
-		// Also sleep before the first try, since dwl needs to load pipewire first
+		pa_context_unref(pa_con.context);
 		nanosleep(&retry_interval, NULL);
 		create_pulse_context();
-	} while (pa_con.failed && !stop_program);
+	}
 
 	pa_mainloop_run(pa_con.mainloop, NULL);
 	
@@ -135,10 +131,9 @@ void update_volume_cb(pa_context *c, const pa_sink_info *info, int eol, void *da
 
 void volume(char *buffer) {
 	if (audio_muted) {
-		sprintf(buffer, "%d %s", pa_con.try_count, pa_con.try_count == 1 ? "try" : "tries");
-		sprintf(buffer, "%s    ^fg(" FG_AC ")^fg() muted", buffer);
+		sprintf(buffer, "^fg(" FG_AC ") ^fg()muted");
 	} else
-		sprintf(buffer, "^fg(" FG_AC ")^fg() %.0f%%",
+		sprintf(buffer, "^fg(" FG_AC ") ^fg()%.0f%%",
 				(float) audio_volume / PA_VOLUME_NORM * 100);
 }
 
@@ -147,11 +142,11 @@ void sleep_state(char *buffer) {
 
 	if (inhibit_sleep_f) {
 		fclose(inhibit_sleep_f);
-		sprintf(buffer, "^fg(" FG_AC ")^fg() on");
+		sprintf(buffer, "^fg(" FG_AC ") ^fg()on");
 		return;
 	}
 
-	sprintf(buffer, "^fg(" FG_AC ")^fg() off");
+	sprintf(buffer, "^fg(" FG_AC ") ^fg()off");
 }
 
 int startswith(char *a, char *b) {
@@ -178,9 +173,9 @@ void memory(char *buffer) {
 	used = memtotal - memavailable;
 
 	if (used < GB)
-		sprintf(buffer, "^fg(" FG_AC ")^fg() %.0fM", (float) used / MB);
+		sprintf(buffer, "^fg(" FG_AC ") ^fg()%.0fM", (float) used / MB);
 	else
-		sprintf(buffer, "^fg(" FG_AC ")^fg() %.1fG", (float) used / GB);
+		sprintf(buffer, "^fg(" FG_AC ") ^fg()%.1fG", (float) used / GB);
 }
 
 void cpu(char *buffer) {
@@ -200,9 +195,9 @@ void cpu(char *buffer) {
 	usage = (float) (diff_total - diff_idle) / (diff_total + 1) * 100;
 
 	if (usage >= 90)
-		sprintf(buffer, "^fg(" FG_AC ")^fg() ^fg(" FG_UR ")%02.0f%%^fg()", usage);
+		sprintf(buffer, "^fg(" FG_AC ") ^fg()^fg(" FG_UR ")%02.0f%%^fg()", usage);
 	else
-		sprintf(buffer, "^fg(" FG_AC ")^fg() %02.0f%%", usage);
+		sprintf(buffer, "^fg(" FG_AC ") ^fg()%02.0f%%", usage);
 }
 
 void temperature(char *buffer) {
@@ -217,9 +212,9 @@ void temperature(char *buffer) {
 	temperature /= 1000;
 
 	if (temperature >= 70)
-		sprintf(buffer, "^fg(" FG_AC ")^fg() ^fg(" FG_UR ")%d°C^fg()", temperature);
+		sprintf(buffer, "^fg(" FG_AC ") ^fg()^fg(" FG_UR ")%d°C^fg()", temperature);
 	else
-		sprintf(buffer, "^fg(" FG_AC ")^fg() %d°C", temperature);
+		sprintf(buffer, "^fg(" FG_AC ") ^fg()%d°C", temperature);
 }
 
 void battery(char *buffer) {
@@ -236,11 +231,11 @@ void battery(char *buffer) {
 	fclose(status_f);
 
 	if (strcmp(status, "Charging") == 0)
-		sprintf(buffer, "^fg(" FG_AC ") ^fg() %u%%", capacity);
+		sprintf(buffer, "^fg(" FG_AC ")  ^fg()%u%%", capacity);
 	else if (capacity <= 10)
-		sprintf(buffer, "^fg(" FG_AC ")^fg() ^fg(" FG_UR ")%u%%^fg()", capacity);
+		sprintf(buffer, "^fg(" FG_AC ") ^fg()^fg(" FG_UR ")%u%%^fg()", capacity);
 	else
-		sprintf(buffer, "^fg(" FG_AC ")^fg() %u%%", capacity);
+		sprintf(buffer, "^fg(" FG_AC ") ^fg()%u%%", capacity);
 }
 
 int wifi_cb(struct nl_msg *msg, void *data) {
@@ -286,7 +281,7 @@ void wifi(char *buffer) {
 
 	if (!ssid) return;
 
-	sprintf(buffer, "^fg(" FG_AC ")^fg() %s", ssid);
+	sprintf(buffer, "^fg(" FG_AC ") ^fg()%s", ssid);
 }
 
 void date(char *buffer) {
@@ -318,8 +313,8 @@ void date(char *buffer) {
 			break;
 	}
 
-	sprintf(buffer, "^fg(" FG_AC ")^fg() %s %02d-%02d" SEP \
-			"^fg(" FG_AC ")^fg() %d:%02d",
+	sprintf(buffer, "^fg(" FG_AC ") ^fg()%s %02d-%02d" SEP \
+			"^fg(" FG_AC ") ^fg()%d:%02d",
 			day, tm.tm_mday, tm.tm_mon + 1, tm.tm_hour, tm.tm_min);
 }
 
@@ -338,7 +333,7 @@ void print_status(void) {
 	wifi(wifi_str);
 	date(date_str);
 
-	sprintf(line, "%s" SEP "%s" SEP "%s" SEP "%s" SEP "%s" SEP "%s" SEP "%s" SEP "%s",
+	sprintf(line, " %s" SEP "%s" SEP "%s" SEP "%s" SEP "%s" SEP "%s" SEP "%s" SEP "%s ",
 			vol_str, slp_str, mem_str, cpu_str, temp_str, bat_str, wifi_str, date_str);
 
 	printf("%s\n", line);
@@ -346,7 +341,7 @@ void print_status(void) {
 }
 
 int main() {
-	struct timespec write_interval = {.tv_sec = 1, .tv_nsec = 0};
+	struct timespec print_interval = {.tv_sec = 1, .tv_nsec = 0};
 
 	signal(SIGINT, handle_signals);
 	signal(SIGTERM, handle_signals);
@@ -355,7 +350,7 @@ int main() {
 
 	while (!stop_program) {
 		print_status();
-		nanosleep(&write_interval, NULL);
+		nanosleep(&print_interval, NULL);
 	}
 
 	cleanup_pulse();

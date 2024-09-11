@@ -332,7 +332,7 @@ void print_status(void) {
 	wifi(wifi_str);
 	date(date_str);
 
-	sprintf(line, "%s" SEP "%s" SEP "%s" SEP "%s" SEP "%s" SEP "%s" SEP "%s" SEP "%s",
+	sprintf(line, " %s" SEP "%s" SEP "%s" SEP "%s" SEP "%s" SEP "%s" SEP "%s" SEP "%s ",
 			vol_str, slp_str, mem_str, cpu_str, temp_str, bat_str, wifi_str, date_str);
 
 	printf("%s\n", line);

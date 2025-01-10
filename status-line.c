@@ -38,7 +38,6 @@ struct cpu_usage {
 	unsigned int user, nice, system, idle, total;
 };
 
-void quit(int signal);
 void sleep_state(int signal);
 void setup_pulse(void);
 void cleanup_pulse(void);
@@ -56,6 +55,7 @@ int wifi_cb(struct nl_msg *msg, void *data);
 void wifi(char *buffer);
 void date(char *buffer);
 void print_status(void);
+void quit(int signal);
 
 enum {
 	SLEEP_STATE, VOLUME, MEMORY,
@@ -78,10 +78,6 @@ int stop_program = 0;
 size_t nr_elems = sizeof(elements) / sizeof(struct element);
 struct pa_connection pa_con;
 struct cpu_usage prev = {0, 0, 0, 0, 0};
-
-void quit(int signal) {
-	stop_program = 1;
-}
 
 void sleep_state(int signal) {
 	FILE *inhibit_sleep_f = fopen("/tmp/inhibit_sleep", "r");
@@ -351,6 +347,10 @@ void print_status(void) {
 
 	printf("%s\n", line);
 	fflush(stdout);
+}
+
+void quit(int signal) {
+	stop_program = 1;
 }
 
 int main() {

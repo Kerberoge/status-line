@@ -18,8 +18,10 @@
 #define BATTERY_PATH	"/sys/class/power_supply/BAT0"
 #define WIFI_DEVICE		"wlo1"
 
-#define MB 1048576
-#define GB 1073741824
+#define MB	1048576
+#define GB	1073741824
+
+#define PREFIX(str, prefix)		!strncmp(str, prefix, strlen(prefix))
 
 struct element {
 	void (*func)(char *);
@@ -46,7 +48,6 @@ void *pulse_worker(void *data);
 void context_state_cb(pa_context *c, void *data);
 void update_volume_cb(pa_context *c, const pa_sink_info *info, int eol, void *data);
 void subscribe_cb(pa_context *c, pa_subscription_event_type_t t, uint32_t i, void *data);
-int startswith(char *a, char *b);
 void memory(char *buffer);
 void cpu(char *buffer);
 void temperature(char *buffer);
@@ -162,10 +163,6 @@ void update_volume_cb(pa_context *c, const pa_sink_info *info, int eol, void *da
 	print_status();
 }
 
-int startswith(char *a, char *b) {
-	return !strncmp(a, b, strlen(b));
-}
-
 void memory(char *buffer) {
 	FILE *meminfo_f = fopen("/proc/meminfo", "r");
 	unsigned long memtotal = 0, memavailable = 0;
@@ -173,9 +170,9 @@ void memory(char *buffer) {
 	char line[50];
 
 	while (fgets(line, sizeof(line), meminfo_f) && (!memtotal || !memavailable)) {
-		if (startswith(line, "MemTotal:"))
+		if (PREFIX(line, "MemTotal:"))
 			memtotal = strtoul(line + strlen("MemTotal:"), NULL, 10);
-		else if (startswith(line, "MemAvailable:"))
+		else if (PREFIX(line, "MemAvailable:"))
 			memavailable = strtoul(line + strlen("MemAvailable:"), NULL, 10);
 	}
 

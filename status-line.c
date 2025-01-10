@@ -38,7 +38,8 @@ struct cpu_usage {
 	unsigned int user, nice, system, idle, total;
 };
 
-void handle_signals(int signal);
+void quit(int signal);
+void sleep_state(int signal);
 void setup_pulse(void);
 void cleanup_pulse(void);
 void create_pulse_context(void);
@@ -46,8 +47,6 @@ void *pulse_worker(void *data);
 void context_state_cb(pa_context *c, void *data);
 void update_volume_cb(pa_context *c, const pa_sink_info *info, int eol, void *data);
 void subscribe_cb(pa_context *c, pa_subscription_event_type_t t, uint32_t i, void *data);
-void volume(char *buffer);
-void sleep_state(char *buffer);
 int startswith(char *a, char *b);
 void memory(char *buffer);
 void cpu(char *buffer);
@@ -58,9 +57,15 @@ void wifi(char *buffer);
 void date(char *buffer);
 void print_status(void);
 
+enum {
+	SLEEP_STATE, VOLUME, MEMORY,
+	CPU, TEMPERATURE, POWER,
+	BATTERY, WIFI, DATE
+};
+
 struct element elements[] = {
-	{ .func = volume },
-	{ .func = sleep_state },
+	{ 0 },
+	{ 0 },
 	{ .func = memory },
 	{ .func = cpu },
 	{ .func = temperature },
@@ -72,11 +77,23 @@ struct element elements[] = {
 int stop_program = 0;
 size_t nr_elems = sizeof(elements) / sizeof(struct element);
 struct pa_connection pa_con;
-int audio_volume = 0, audio_muted = 0;
 struct cpu_usage prev = {0, 0, 0, 0, 0};
 
-void handle_signals(int signal) {
+void quit(int signal) {
 	stop_program = 1;
+}
+
+void sleep_state(int signal) {
+	FILE *inhibit_sleep_f = fopen("/tmp/inhibit_sleep", "r");
+
+	if (inhibit_sleep_f) {
+		fclose(inhibit_sleep_f);
+		sprintf(elements[SLEEP_STATE].str, "^vpos(-2)^fg(ed24d6)⬤^fg()^vpos()");
+	} else {
+		elements[SLEEP_STATE].str[0] = '\0';
+	}
+
+	print_status();
 }
 
 void setup_pulse(void) {
@@ -140,30 +157,13 @@ void subscribe_cb(pa_context *c, pa_subscription_event_type_t t, uint32_t i, voi
 void update_volume_cb(pa_context *c, const pa_sink_info *info, int eol, void *data) {
 	if (eol > 0 || !info) return;
 
-	audio_volume = pa_cvolume_avg(&info->volume);
-	audio_muted = info->mute;
+	if (info->mute)
+		sprintf(elements[VOLUME].str, "^fg(" FG_AC ")V^fg() muted");
+	else
+		sprintf(elements[VOLUME].str, "^fg(" FG_AC ")V^fg() %.0f%%",
+				(float) pa_cvolume_avg(&info->volume) / PA_VOLUME_NORM * 100);
 
 	print_status();
-}
-
-void volume(char *buffer) {
-	if (audio_muted) {
-		sprintf(buffer, "^fg(" FG_AC ")V^fg() muted");
-	} else
-		sprintf(buffer, "^fg(" FG_AC ")V^fg() %.0f%%",
-				(float) audio_volume / PA_VOLUME_NORM * 100);
-}
-
-void sleep_state(char *buffer) {
-	FILE *inhibit_sleep_f = fopen("/tmp/inhibit_sleep", "r");
-
-	if (inhibit_sleep_f) {
-		fclose(inhibit_sleep_f);
-		sprintf(buffer, "^fg(" FG_AC ")S^fg() on");
-		return;
-	}
-
-	sprintf(buffer, "^fg(" FG_AC ")S^fg() off");
 }
 
 int startswith(char *a, char *b) {
@@ -339,10 +339,13 @@ void print_status(void) {
 
 	strcat(line, " ");
 	for (struct element *e = elements; e < elements + nr_elems; e++) {
-		e->func(e->str);
-		strcat(line, e->str);
-		if (e < elements + nr_elems - 1)
-			strcat(line, SEP);
+		if (e->func)
+			e->func(e->str);
+		if (*e->str) {
+			strcat(line, e->str);
+			if (e < elements + nr_elems - 1)
+				strcat(line, SEP);
+		}
 	}
 	strcat(line, " ");
 
@@ -353,8 +356,9 @@ void print_status(void) {
 int main() {
 	struct timespec print_interval = {.tv_sec = 1, .tv_nsec = 0};
 
-	signal(SIGINT, handle_signals);
-	signal(SIGTERM, handle_signals);
+	signal(SIGINT, quit);
+	signal(SIGTERM, quit);
+	signal(SIGUSR1, sleep_state);
 
 	for (struct element *e = elements; e < elements + nr_elems; e++)
 		e->str = malloc(100);

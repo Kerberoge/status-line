@@ -26,6 +26,7 @@
 struct element {
 	void (*func)(char *);
 	char *str;
+	int smallsep;
 };
 
 struct pa_connection {
@@ -40,7 +41,6 @@ struct cpu_usage {
 	unsigned int user, nice, system, idle, total;
 };
 
-void sleep_state(int signal);
 void setup_pulse(void);
 void cleanup_pulse(void);
 void create_pulse_context(void);
@@ -56,17 +56,17 @@ void battery(char *buffer);
 int wifi_cb(struct nl_msg *msg, void *data);
 void wifi(char *buffer);
 void date(char *buffer);
+void sleep_state(int signal);
 void print_status(void);
 void quit(int signal);
 
 enum {
-	SLEEP_STATE, VOLUME, MEMORY,
-	CPU, TEMPERATURE, POWER,
-	BATTERY, WIFI, DATE
+	VOLUME, MEMORY, CPU,
+	TEMPERATURE, POWER, BATTERY,
+	WIFI, DATE, SLEEP_STATE
 };
 
 struct element elements[] = {
-	{ 0 },
 	{ 0 },
 	{ .func = memory },
 	{ .func = cpu },
@@ -74,26 +74,14 @@ struct element elements[] = {
 	{ .func = power },
 	{ .func = battery },
 	{ .func = wifi },
-	{ .func = date }
+	{ .func = date },
+	{ .smallsep = 1 }
 };
 
 int stop_program = 0;
 size_t nr_elems = sizeof(elements) / sizeof(struct element);
 struct pa_connection pa_con;
 struct cpu_usage prev = {0, 0, 0, 0, 0};
-
-void sleep_state(int signal) {
-	FILE *inhibit_sleep_f = fopen("/tmp/inhibit_sleep", "r");
-
-	if (inhibit_sleep_f) {
-		fclose(inhibit_sleep_f);
-		sprintf(elements[SLEEP_STATE].str, "^vpos(-2)^fg(ed24d6)⬤^fg()^vpos()");
-	} else {
-		elements[SLEEP_STATE].str[0] = '\0';
-	}
-
-	print_status();
-}
 
 void setup_pulse(void) {
 	pthread_create(&pa_con.thread, NULL, pulse_worker, NULL);
@@ -341,17 +329,31 @@ void date(char *buffer) {
 			day, tm.tm_mday, tm.tm_mon + 1, tm.tm_hour, tm.tm_min);
 }
 
+void sleep_state(int signal) {
+	FILE *inhibit_sleep_f = fopen("/tmp/inhibit_sleep", "r");
+
+	if (inhibit_sleep_f) {
+		fclose(inhibit_sleep_f);
+		sprintf(elements[SLEEP_STATE].str, "^vpos(-2)^fg(ed24d6)⬤^fg()^vpos()");
+	} else {
+		elements[SLEEP_STATE].str[0] = '\0';
+	}
+
+	print_status();
+}
+
 void print_status(void) {
 	char line[400] = "";
 
-	strcat(line, " ");
 	for (struct element *e = elements; e < elements + nr_elems; e++) {
 		if (e->func)
 			e->func(e->str);
 		if (*e->str) {
-			strcat(line, e->str);
-			if (e < elements + nr_elems - 1)
+			if (!line[0] || e->smallsep)
+				strcat(line, " ");
+			else
 				strcat(line, SEP);
+			strcat(line, e->str);
 		}
 	}
 	strcat(line, " ");

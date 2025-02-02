@@ -11,6 +11,7 @@
 #include <netlink/genl/ctrl.h>
 
 #define FG_AC	"37bf7c"
+#define FG_WN	"ffff00"
 #define FG_UR	"ff5050"
 #define SEP		"     "
 
@@ -48,6 +49,7 @@ void *pulse_worker(void *data);
 void context_state_cb(pa_context *c, void *data);
 void update_volume_cb(pa_context *c, const pa_sink_info *info, int eol, void *data);
 void subscribe_cb(pa_context *c, pa_subscription_event_type_t t, uint32_t i, void *data);
+void sleep_state(int signal);
 void memory(char *buffer);
 void cpu(char *buffer);
 void temperature(char *buffer);
@@ -55,29 +57,25 @@ void battery(char *buffer);
 int wifi_cb(struct nl_msg *msg, void *data);
 void wifi(char *buffer);
 void date(char *buffer);
-void sleep_state(int signal);
 void print_status(void);
 void quit(int signal);
 
-enum {
-	VOLUME, MEMORY, CPU,
-	TEMPERATURE, POWER, BATTERY,
-	WIFI, DATE, SLEEP_STATE
-};
-
 struct element elements[] = {
 	{ 0 },
+	{ .smallsep = 1 },
 	{ .func = memory },
 	{ .func = cpu },
 	{ .func = temperature },
 	{ .func = battery },
 	{ .func = wifi },
-	{ .func = date },
-	{ .smallsep = 1 }
+	{ .func = date }
 };
 
-int stop_program = 0;
+#define	VOLUME_BUF		elements[0].str
+#define	SLEEP_STATE_BUF	elements[1].str
+
 size_t nr_elems = sizeof(elements) / sizeof(struct element);
+int stop_program = 0;
 struct pa_connection pa_con;
 struct cpu_usage prev = {0, 0, 0, 0, 0};
 
@@ -143,10 +141,23 @@ void update_volume_cb(pa_context *c, const pa_sink_info *info, int eol, void *da
 	if (eol > 0 || !info) return;
 
 	if (info->mute)
-		sprintf(elements[VOLUME].str, "^fg(" FG_AC ")V^fg() muted");
+		sprintf(VOLUME_BUF, "^fg(" FG_AC ")V^fg() muted");
 	else
-		sprintf(elements[VOLUME].str, "^fg(" FG_AC ")V^fg() %.0f%%",
+		sprintf(VOLUME_BUF, "^fg(" FG_AC ")V^fg() %.0f%%",
 				(float) pa_cvolume_avg(&info->volume) / PA_VOLUME_NORM * 100);
+
+	print_status();
+}
+
+void sleep_state(int signal) {
+	FILE *inhibit_sleep_f = fopen("/tmp/inhibit_sleep", "r");
+
+	if (inhibit_sleep_f) {
+		fclose(inhibit_sleep_f);
+		sprintf(SLEEP_STATE_BUF, "^fg(" FG_WN ")INSOMNIA^fg()");
+	} else {
+		SLEEP_STATE_BUF[0] = '\0';
+	}
 
 	print_status();
 }
@@ -315,19 +326,6 @@ void date(char *buffer) {
 			day, tm.tm_mday, tm.tm_mon + 1, tm.tm_hour, tm.tm_min);
 }
 
-void sleep_state(int signal) {
-	FILE *inhibit_sleep_f = fopen("/tmp/inhibit_sleep", "r");
-
-	if (inhibit_sleep_f) {
-		fclose(inhibit_sleep_f);
-		sprintf(elements[SLEEP_STATE].str, "^vpos(-2)^fg(ed24d6)⬤^fg()^vpos()");
-	} else {
-		elements[SLEEP_STATE].str[0] = '\0';
-	}
-
-	print_status();
-}
-
 void print_status(void) {
 	char line[400] = "";
 
@@ -362,11 +360,12 @@ int main() {
 	for (struct element *e = elements; e < elements + nr_elems; e++)
 		e->str = malloc(100);
 
+	sleep_state(0);
 	setup_pulse();
 
 	while (!stop_program) {
-		print_status();
 		nanosleep(&print_interval, NULL);
+		print_status();
 	}
 
 	cleanup_pulse();

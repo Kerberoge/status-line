@@ -9,10 +9,10 @@
 #define SEP		"     "
 
 struct element elements[] = {
-	{ volume,	"^fg(" FG_AC ")V^fg() %.0f%%",					/* normal */
-				"^fg(" FG_AC ")V^fg() muted" },					/* muted */
 	{ sleep_state,	"",											/* normal */
 					"^fg(" FG_WN ")INSOMNIA^fg()" },			/* sleep inhibition */
+	{ volume,	"^fg(" FG_AC ")V^fg() %.0f%%",					/* normal */
+				"^fg(" FG_AC ")V^fg() muted" },					/* muted */
 	{ memory,	"^fg(" FG_AC ")M^fg() %.0fM",					/* < 1GB */
 				"^fg(" FG_AC ")M^fg() %.1fG" },					/* > 1GB */
 	{ cpu,		"^fg(" FG_AC ")C^fg() %02.0f%%",						/* normal */

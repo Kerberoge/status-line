@@ -10,24 +10,16 @@
 #include <netlink/genl/genl.h>
 #include <netlink/genl/ctrl.h>
 
-#define FG_AC	"37bf7c"
-#define FG_WN	"ffff00"
-#define FG_UR	"ff5050"
-#define SEP		"     "
-
-#define HWMON_PATH		"/sys/class/hwmon/hwmon2/temp1_input"
-#define BATTERY_PATH	"/sys/class/power_supply/BAT0"
-#define WIFI_DEVICE		"wlo1"
-
 #define MB	1048576
 #define GB	1073741824
 
 #define PREFIX(str, prefix)		!strncmp(str, prefix, strlen(prefix))
 
 struct element {
-	void (*func)(char *);
-	char *str;
-	int smallsep;
+	void (*func)();
+	char *fmt1, *fmt2, *fmt3;
+	char *buf;
+	int dontcall;
 };
 
 struct pa_connection {
@@ -42,57 +34,34 @@ struct cpu_usage {
 	unsigned int user, nice, system, idle, total;
 };
 
-void sleep_state(int signal);
 void setup_pulse(void);
 void cleanup_pulse(void);
 void create_pulse_context(void);
 void *pulse_worker(void *data);
 void context_state_cb(pa_context *c, void *data);
-void update_volume_cb(pa_context *c, const pa_sink_info *info, int eol, void *data);
 void subscribe_cb(pa_context *c, pa_subscription_event_type_t t, uint32_t i, void *data);
-void memory(char *buffer);
-void cpu(char *buffer);
-void temperature(char *buffer);
-void power(char *buffer);
-void battery(char *buffer);
+void volume(pa_context *c, const pa_sink_info *info, int eol, void *data);
+
+void sleep_state(int signal);
+void memory(struct element *ctx);
+void cpu(struct element *ctx);
+void temperature(struct element *ctx);
+void power(struct element *ctx);
+void battery(struct element *ctx);
 int wifi_cb(struct nl_msg *msg, void *data);
-void wifi(char *buffer);
-void date(char *buffer);
+void wifi(struct element *ctx);
+void date(struct element *ctx);
+
 void print_status(void);
 void quit(int signal);
 
-struct element elements[] = {
-	{ .smallsep = 1 },
-	{ 0 },
-	{ .func = memory },
-	{ .func = cpu },
-	{ .func = temperature },
-	{ .func = power },
-	{ .func = battery },
-	{ .func = wifi },
-	{ .func = date }
-};
-
-#define	SLEEP_STATE_BUF	elements[0].str
-#define	VOLUME_BUF		elements[1].str
+#include "config.h"
 
 size_t nr_elems = sizeof(elements) / sizeof(struct element);
+struct element *sleep_state_ctx, *volume_ctx;
 int stop_program = 0;
 struct pa_connection pa_con;
 struct cpu_usage prev = {0, 0, 0, 0, 0};
-
-void sleep_state(int signal) {
-	FILE *inhibit_sleep_f = fopen("/tmp/inhibit_sleep", "r");
-
-	if (inhibit_sleep_f) {
-		fclose(inhibit_sleep_f);
-		sprintf(SLEEP_STATE_BUF, "^fg(" FG_WN ")INSOMNIA^fg()");
-	} else {
-		SLEEP_STATE_BUF[0] = '\0';
-	}
-
-	print_status();
-}
 
 void setup_pulse(void) {
 	pthread_create(&pa_con.thread, NULL, pulse_worker, NULL);
@@ -125,7 +94,7 @@ void *pulse_worker(void *data) {
 	}
 
 	pa_mainloop_run(pa_con.mainloop, NULL);
-	
+
 	pa_context_disconnect(pa_con.context);
 	pa_context_unref(pa_con.context);
 	pa_mainloop_free(pa_con.mainloop);
@@ -136,8 +105,8 @@ void *pulse_worker(void *data) {
 void context_state_cb(pa_context *c, void *data) {
 	switch (pa_context_get_state(c)) {
 		case PA_CONTEXT_READY:
-			// Correct volume should be displayed even when no event is received
-			pa_context_get_sink_info_by_name(c, "@DEFAULT_SINK@", update_volume_cb, NULL);
+			// correct volume should be displayed even when no event is received
+			pa_context_get_sink_info_by_name(c, "@DEFAULT_SINK@", volume, NULL);
 
 			pa_context_set_subscribe_callback(pa_con.context, subscribe_cb, NULL);
 			pa_context_subscribe(pa_con.context, PA_SUBSCRIPTION_MASK_SINK, NULL, NULL);
@@ -149,22 +118,36 @@ void context_state_cb(pa_context *c, void *data) {
 }
 
 void subscribe_cb(pa_context *c, pa_subscription_event_type_t t, uint32_t i, void *data) {
-	pa_context_get_sink_info_by_name(c, "@DEFAULT_SINK@", update_volume_cb, NULL);
+	pa_context_get_sink_info_by_name(c, "@DEFAULT_SINK@", volume, NULL);
 }
 
-void update_volume_cb(pa_context *c, const pa_sink_info *info, int eol, void *data) {
+void volume(pa_context *c, const pa_sink_info *info, int eol, void *data) {
 	if (eol > 0 || !info) return;
 
 	if (info->mute)
-		sprintf(VOLUME_BUF, "^fg(" FG_AC ")V^fg() muted");
+		sprintf(volume_ctx->buf, volume_ctx->fmt2);
 	else
-		sprintf(VOLUME_BUF, "^fg(" FG_AC ")V^fg() %.0f%%",
+		sprintf(volume_ctx->buf, volume_ctx->fmt1,
 				(float) pa_cvolume_avg(&info->volume) / PA_VOLUME_NORM * 100);
 
 	print_status();
 }
 
-void memory(char *buffer) {
+void sleep_state(int signal) {
+	FILE *inhibit_sleep_f = fopen("/tmp/inhibit_sleep", "r");
+
+	if (inhibit_sleep_f) {
+		fclose(inhibit_sleep_f);
+		sprintf(sleep_state_ctx->buf, sleep_state_ctx->fmt2);
+	} else {
+		sprintf(sleep_state_ctx->buf, sleep_state_ctx->fmt1);
+	}
+
+	if (signal > 0) // don't print on first run
+		print_status();
+}
+
+void memory(struct element *ctx) {
 	FILE *meminfo_f = fopen("/proc/meminfo", "r");
 	unsigned long memtotal = 0, memavailable = 0;
 	unsigned long used;
@@ -184,12 +167,12 @@ void memory(char *buffer) {
 	used = memtotal - memavailable;
 
 	if (used < GB)
-		sprintf(buffer, "^fg(" FG_AC ")M^fg() %.0fM", (float) used / MB);
+		sprintf(ctx->buf, ctx->fmt1, (float) used / MB);
 	else
-		sprintf(buffer, "^fg(" FG_AC ")M^fg() %.1fG", (float) used / GB);
+		sprintf(ctx->buf, ctx->fmt2, (float) used / GB);
 }
 
-void cpu(char *buffer) {
+void cpu(struct element *ctx) {
 	FILE *stat_f = fopen("/proc/stat", "r");
 	struct cpu_usage curr;
 	unsigned int diff_idle, diff_total;
@@ -206,12 +189,12 @@ void cpu(char *buffer) {
 	usage = (float) (diff_total - diff_idle) / (diff_total + 1) * 100;
 
 	if (usage >= 90)
-		sprintf(buffer, "^fg(" FG_AC ")C^fg() ^fg(" FG_UR ")%02.0f%%^fg()", usage);
+		sprintf(ctx->buf, ctx->fmt2, usage);
 	else
-		sprintf(buffer, "^fg(" FG_AC ")C^fg() %02.0f%%", usage);
+		sprintf(ctx->buf, ctx->fmt1, usage);
 }
 
-void temperature(char *buffer) {
+void temperature(struct element *ctx) {
 	FILE *temperature_f = fopen(HWMON_PATH, "r");
 	int temperature;
 
@@ -223,12 +206,12 @@ void temperature(char *buffer) {
 	temperature /= 1000;
 
 	if (temperature >= 70)
-		sprintf(buffer, "^fg(" FG_AC ")T^fg() ^fg(" FG_UR ")%d°C^fg()", temperature);
+		sprintf(ctx->buf, ctx->fmt2, temperature);
 	else
-		sprintf(buffer, "^fg(" FG_AC ")T^fg() %d°C", temperature);
+		sprintf(ctx->buf, ctx->fmt1, temperature);
 }
 
-void power(char *buffer) {
+void power(struct element *ctx) {
 	FILE *power_now_f = fopen(BATTERY_PATH "/power_now", "r");
 	unsigned int power_now;
 
@@ -237,10 +220,10 @@ void power(char *buffer) {
 	fscanf(power_now_f, "%u", &power_now);
 	fclose(power_now_f);
 
-	sprintf(buffer, "^fg(" FG_AC ")P^fg() %4.1fW", (float) power_now / 1e6);
+	sprintf(ctx->buf, ctx->fmt1, (float) power_now / 1e6);
 }
 
-void battery(char *buffer) {
+void battery(struct element *ctx) {
 	FILE *capacity_f = fopen(BATTERY_PATH "/capacity", "r");
 	FILE *status_f = fopen(BATTERY_PATH "/status", "r");
 	unsigned int capacity;
@@ -254,15 +237,16 @@ void battery(char *buffer) {
 	fclose(status_f);
 
 	if (strcmp(status, "Charging") == 0)
-		sprintf(buffer, "^fg(" FG_AC ")Ch^fg() %u%%", capacity);
+		sprintf(ctx->buf, ctx->fmt2, capacity);
 	else if (capacity <= 10)
-		sprintf(buffer, "^fg(" FG_AC ")B^fg() ^fg(" FG_UR ")%u%%^fg()", capacity);
+		sprintf(ctx->buf, ctx->fmt3, capacity);
 	else
-		sprintf(buffer, "^fg(" FG_AC ")B^fg() %u%%", capacity);
+		sprintf(ctx->buf, ctx->fmt1, capacity);
 }
 
 int wifi_cb(struct nl_msg *msg, void *data) {
-	char **ssid = data;
+	struct element **ctx = data;
+	char *ssid;
 	struct nlattr *attrs[NL80211_ATTR_MAX + 1];
 	struct genlmsghdr *gnlh = nlmsg_data(nlmsg_hdr(msg));
 
@@ -270,17 +254,17 @@ int wifi_cb(struct nl_msg *msg, void *data) {
 			genlmsg_attrlen(gnlh, 0), NULL) < 0)
 		return NL_SKIP;
 
-	if (attrs[NL80211_ATTR_SSID])
-		*ssid = nla_get_string(attrs[NL80211_ATTR_SSID]);
-	else
-		*ssid = "^fg(" FG_UR ")disconnected^fg()";
+	if (attrs[NL80211_ATTR_SSID]) {
+		ssid = nla_get_string(attrs[NL80211_ATTR_SSID]);
+		sprintf((*ctx)->buf, (*ctx)->fmt1, ssid);
+	} else {
+		sprintf((*ctx)->buf, (*ctx)->fmt2);
+	}
 
 	return NL_STOP;
 }
 
-void wifi(char *buffer) {
-	char *ssid;
-
+void wifi(struct element *ctx) {
 	struct nl_sock *sk = nl_socket_alloc();
 	if (genl_connect(sk) < 0) {
 		nl_socket_free(sk);
@@ -297,17 +281,13 @@ void wifi(char *buffer) {
 			0, 0, NL80211_CMD_GET_INTERFACE, 0);
 	nla_put_u32(msg, NL80211_ATTR_IFINDEX, if_nametoindex(WIFI_DEVICE));
 
-	nl_socket_modify_cb(sk, NL_CB_VALID, NL_CB_CUSTOM, wifi_cb, &ssid);
+	nl_socket_modify_cb(sk, NL_CB_VALID, NL_CB_CUSTOM, wifi_cb, &ctx);
 	nl_send_sync(sk, msg);
 
 	nl_socket_free(sk);
-
-	if (!ssid) return;
-
-	sprintf(buffer, "^fg(" FG_AC ")W^fg() %s", ssid);
 }
 
-void date(char *buffer) {
+void date(struct element *ctx) {
 	time_t t = time(NULL);
 	struct tm tm = *localtime(&t);
 	char *day;
@@ -336,22 +316,24 @@ void date(char *buffer) {
 			break;
 	}
 
-	sprintf(buffer, "^fg(" FG_AC ")D^fg() %s %02d-%02d  %d:%02d",
+	sprintf(ctx->buf, ctx->fmt1,
 			day, tm.tm_mday, tm.tm_mon + 1, tm.tm_hour, tm.tm_min);
 }
 
 void print_status(void) {
-	char line[400] = "";
+	char line[500] = "";
 
 	for (struct element *e = elements; e < elements + nr_elems; e++) {
-		if (e->func)
-			e->func(e->str);
-		if (*e->str) {
-			if (!line[0] || e->smallsep)
+		if (e->func && !e->dontcall)
+			e->func(e);
+
+		if (*e->buf) {
+			if (!line[0]) // first element
 				strcat(line, " ");
 			else
 				strcat(line, SEP);
-			strcat(line, e->str);
+
+			strcat(line, e->buf);
 		}
 	}
 	strcat(line, " ");
@@ -369,12 +351,21 @@ int main() {
 
 	signal(SIGINT, quit);
 	signal(SIGTERM, quit);
-	signal(SIGUSR1, sleep_state);
 
-	for (struct element *e = elements; e < elements + nr_elems; e++)
-		e->str = malloc(100);
+	for (struct element *e = elements; e < elements + nr_elems; e++) {
+		e->buf = malloc(100);
 
-	sleep_state(0);
+		if (e->func == volume) {
+			volume_ctx = e;
+			e->dontcall = 1;
+		} else if (e->func == sleep_state) {
+			sleep_state_ctx = e;
+			e->dontcall = 1;
+			signal(SIGUSR1, sleep_state);
+			sleep_state(0);
+		}
+	}
+
 	setup_pulse();
 
 	while (!stop_program) {
@@ -385,7 +376,7 @@ int main() {
 	cleanup_pulse();
 
 	for (struct element *e = elements; e < elements + nr_elems; e++)
-		free(e->str);
+		free(e->buf);
 
 	return 0;
 }

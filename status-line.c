@@ -3,6 +3,7 @@
 #include <string.h>
 #include <signal.h>
 #include <time.h>				/* for nanosleep() */
+#include <unistd.h>				/* for getpid() */
 #include <pulse/pulseaudio.h>	/* next 2 are for the volume module */
 #include <pthread.h>
 #include <net/if.h>				/* next 4 are for the wifi module */
@@ -42,7 +43,7 @@ void context_state_cb(pa_context *c, void *data);
 void subscribe_cb(pa_context *c, pa_subscription_event_type_t t, uint32_t i, void *data);
 void volume(pa_context *c, const pa_sink_info *info, int eol, void *data);
 
-void sleep_state(int signal);
+void sleep_state(struct element *ctx);
 void memory(struct element *ctx);
 void cpu(struct element *ctx);
 void temperature(struct element *ctx);
@@ -57,7 +58,7 @@ void quit(int signal);
 #include "config.h"
 
 size_t nr_elems = sizeof(elements) / sizeof(struct element);
-struct element *sleep_state_ctx, *volume_ctx;
+struct element *volume_ctx;
 int stop_program = 0;
 struct pa_connection pa_con;
 struct cpu_usage prev = {0, 0, 0, 0, 0};
@@ -129,21 +130,19 @@ void volume(pa_context *c, const pa_sink_info *info, int eol, void *data) {
 		sprintf(volume_ctx->buf, volume_ctx->fmt1,
 				(float) pa_cvolume_avg(&info->volume) / PA_VOLUME_NORM * 100);
 
-	print_status();
+	// force a refresh
+	kill(getpid(), SIGUSR1);
 }
 
-void sleep_state(int signal) {
+void sleep_state(struct element *ctx) {
 	FILE *inhibit_sleep_f = fopen("/tmp/inhibit_sleep", "r");
 
 	if (inhibit_sleep_f) {
 		fclose(inhibit_sleep_f);
-		sprintf(sleep_state_ctx->buf, sleep_state_ctx->fmt2);
+		sprintf(ctx->buf, ctx->fmt2);
 	} else {
-		sprintf(sleep_state_ctx->buf, sleep_state_ctx->fmt1);
+		sprintf(ctx->buf, ctx->fmt1);
 	}
-
-	if (signal > 0) // don't print on first run
-		print_status();
 }
 
 void memory(struct element *ctx) {
@@ -329,6 +328,16 @@ void print_status(void) {
 	fflush(stdout);
 }
 
+void refresh(int signal) {
+	// run all functions that don't normally run during the main loop
+	for (struct element *e = elements; e < elements + nr_elems; e++) {
+		if (e->func && e->dontcall == 1)
+			e->func(e);
+	}
+	// running print_status() is not needed, as nanosleep() gets interrupted
+	// upon receiving a signal
+}
+
 void quit(int signal) {
 	stop_program = 1;
 }
@@ -338,18 +347,16 @@ int main() {
 
 	signal(SIGINT, quit);
 	signal(SIGTERM, quit);
+	signal(SIGUSR1, refresh);
 
 	for (struct element *e = elements; e < elements + nr_elems; e++) {
 		e->buf = malloc(100);
 
 		if (e->func == volume) {
 			volume_ctx = e;
-			e->dontcall = 1;
+			e->dontcall = 2;
 		} else if (e->func == sleep_state) {
-			sleep_state_ctx = e;
 			e->dontcall = 1;
-			signal(SIGUSR1, sleep_state);
-			sleep_state(0);
 		}
 	}
 

@@ -8,7 +8,8 @@ LDLIBS		= -lnl-3 -lnl-genl-3 -lpulse -lpthread
 CFLAGS		+= -fdata-sections -ffunction-sections
 LDFLAGS		+= -Wl,--gc-sections
 
-status-line: status-line.c
+status-line: config.h status-line.c
+	$(CC) $(CFLAGS) $(LDFLAGS) status-line.c $(LDLIBS) -o $@
 
 clean:
 	rm status-line

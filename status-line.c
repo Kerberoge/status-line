@@ -224,15 +224,27 @@ void temperature(struct element *ctx) {
 }
 
 void power(struct element *ctx) {
-	FILE *power_now_f = fopen(BATTERY_PATH "/power_now", "r");
-	unsigned int power_now;
+	FILE *power_now_f, *volt_now_f, *curr_now_f;
+	float power_now, volt_now, curr_now;
 
-	if (!power_now_f) return;
+	if (power_now_f = fopen(BATTERY_PATH "/power_now", "r")) {
+		fscanf(power_now_f, "%f", &power_now);
+		fclose(power_now_f);
 
-	fscanf(power_now_f, "%u", &power_now);
-	fclose(power_now_f);
+		power_now /= 1e6;
+	} else if ((volt_now_f = fopen(BATTERY_PATH "/voltage_now", "r"))
+			&& (curr_now_f = fopen(BATTERY_PATH "/current_now", "r"))) {
+		fscanf(volt_now_f, "%f", &volt_now);
+		fscanf(curr_now_f, "%f", &curr_now);
+		fclose(volt_now_f);
+		fclose(curr_now_f);
 
-	sprintf(ctx->buf, ctx->fmt1, (float) power_now / 1e6);
+		power_now = volt_now * curr_now / 1e12;
+	} else {
+		return;
+	}
+
+	sprintf(ctx->buf, ctx->fmt1, power_now);
 }
 
 void battery(struct element *ctx) {

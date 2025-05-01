@@ -148,7 +148,7 @@ void sleep_state(struct element *ctx) {
 }
 
 void kb_layout(struct element *ctx) {
-	FILE *kb_layout_f = fopen("/tmp/dwl_kblayout", "r");
+	FILE *kb_layout_f = fopen("/tmp/dwl/kblayout", "r");
 	char line[100];
 
 	if (!kb_layout_f) return;

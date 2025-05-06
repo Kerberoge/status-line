@@ -17,4 +17,4 @@ clean:
 install:
 	install -s -D -t $(PREFIX)/bin/desktop status-line
 
-.PHONY: clean
+.PHONY: clean install

@@ -2,8 +2,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <signal.h>
-#include <time.h>				// for nanosleep()
-#include <unistd.h>				// for getpid()
+#include <unistd.h>
+#include <libgen.h>
+#include <sys/inotify.h>
 #include <pulse/pulseaudio.h>	// next 2 are for the volume module
 #include <pthread.h>
 #include <net/if.h>				// next 4 are for the wifi module
@@ -14,37 +15,58 @@
 #define MB	1048576
 #define GB	1073741824
 
-#define PREFIX(str, prefix)		!strncmp(str, prefix, strlen(prefix))
+#define ELEMS_FOREACH(it)	for (struct element *it = elements; \
+								it < elements + sizeof(elements) / sizeof(struct element); \
+								it++)
+#define PREFIX(str, prefix)	!strncmp(str, prefix, strlen(prefix))
 
 struct element {
 	void (*func)();
+	int call;
 	char *fmt1, *fmt2, *fmt3;
-	char *buf;
-	int dontcall;
+	char buf[100];
+	void *data;
 };
 
-struct pa_connection {
+struct pulse_data {
+	pthread_t thread;
+	int readfd, writefd;
+	struct element *ctx;
 	pa_mainloop *mainloop;
 	pa_mainloop_api *mainloop_api;
 	pa_context *context;
-	pthread_t thread;
 	int failed;
 };
 
-struct cpu_usage {
+#define NWATCHES 2
+
+enum { IN_SLEEP, IN_KBLAYOUT };
+
+struct inotify_watch {
+	int wd;
+	uint32_t mask;
+	char name[100];
+	struct element *ctx;
+};
+
+struct inotify_data {
+	int fd;
+	uint8_t iev[sizeof(struct inotify_event) + NAME_MAX + 1];
+	struct inotify_watch iw[NWATCHES];
+};
+
+struct cpu_data {
 	unsigned int user, nice, system, idle, total;
 };
 
-void setup_pulse(void);
-void cleanup_pulse(void);
-void create_pulse_context(void);
+void create_pulse_context(struct pulse_data *pd);
 void *pulse_worker(void *data);
 void context_state_cb(pa_context *c, void *data);
 void subscribe_cb(pa_context *c, pa_subscription_event_type_t t, uint32_t i, void *data);
 void volume(pa_context *c, const pa_sink_info *info, int eol, void *data);
 
 void sleep_state(struct element *ctx);
-void kb_layout(struct element *ctx);
+void kblayout(struct element *ctx);
 void memory(struct element *ctx);
 void cpu(struct element *ctx);
 void temperature(struct element *ctx);
@@ -59,85 +81,163 @@ void quit(int signal);
 
 #include "config.h"
 
-size_t nr_elems = sizeof(elements) / sizeof(struct element);
-struct element *volume_ctx;
 int stop_program = 0;
-struct pa_connection pa_con;
-struct cpu_usage prev = {0, 0, 0, 0, 0};
 
-void setup_pulse(void) {
-	pthread_create(&pa_con.thread, NULL, pulse_worker, NULL);
+int pulse_setup(struct element *ctx, struct pulse_data *pdata) {
+	int dummy_pipe[2];
+
+	pipe(dummy_pipe);
+	pdata->readfd = dummy_pipe[0];
+	pdata->writefd = dummy_pipe[1];
+	pdata->ctx = ctx;
+	pthread_create(&pdata->thread, NULL, pulse_worker, pdata);
+
+	return pdata->readfd;
 }
 
-void cleanup_pulse(void) {
-	pa_mainloop_quit(pa_con.mainloop, 0);
-	pthread_join(pa_con.thread, NULL);
+void pulse_quit(struct pulse_data *pdata) {
+	pa_mainloop_quit(pdata->mainloop, 0);
+	pthread_join(pdata->thread, NULL);
+	close(pdata->readfd);
+	close(pdata->writefd);
 }
 
-void create_pulse_context(void) {
-	pa_con.context = pa_context_new(pa_con.mainloop_api, "status-line");
-	pa_context_set_state_callback(pa_con.context, context_state_cb, NULL);
-	pa_context_connect(pa_con.context, NULL, PA_CONTEXT_NOFLAGS, NULL);
+void pulse_handle(struct pulse_data *pdata) {
+	int ret;
+
+	read(pdata->readfd, &ret, sizeof(ret));
+}
+
+void create_pulse_context(struct pulse_data *pdata) {
+	pdata->context = pa_context_new(pdata->mainloop_api, "status-line");
+	pa_context_set_state_callback(pdata->context, context_state_cb, pdata);
+	pa_context_connect(pdata->context, NULL, PA_CONTEXT_NOFLAGS, NULL);
 }
 
 void *pulse_worker(void *data) {
-	struct timespec retry_interval = {.tv_sec = 0, .tv_nsec = 200000000};
+	struct pulse_data *pdata = data;
+	struct timespec retry_interval = { .tv_sec = 0, .tv_nsec = 2e8 };
 
-	pa_con.mainloop = pa_mainloop_new();
-	pa_con.mainloop_api = pa_mainloop_get_api(pa_con.mainloop);
+	pdata->mainloop = pa_mainloop_new();
+	pdata->mainloop_api = pa_mainloop_get_api(pdata->mainloop);
 
 	nanosleep(&retry_interval, NULL);
-	create_pulse_context();
-	while (pa_con.failed && !stop_program) {
-		pa_con.failed = 0;
-		pa_context_unref(pa_con.context);
+	create_pulse_context(pdata);
+	while (pdata->failed && !stop_program) {
+		pdata->failed = 0;
+		pa_context_unref(pdata->context);
 		nanosleep(&retry_interval, NULL);
-		create_pulse_context();
+		create_pulse_context(pdata);
 	}
 
-	pa_mainloop_run(pa_con.mainloop, NULL);
+	pa_mainloop_run(pdata->mainloop, NULL);
 
-	pa_context_disconnect(pa_con.context);
-	pa_context_unref(pa_con.context);
-	pa_mainloop_free(pa_con.mainloop);
+	pa_context_disconnect(pdata->context);
+	pa_context_unref(pdata->context);
+	pa_mainloop_free(pdata->mainloop);
 
 	return NULL;
 }
 
 void context_state_cb(pa_context *c, void *data) {
+	struct pulse_data *pdata = data;
+
 	switch (pa_context_get_state(c)) {
 		case PA_CONTEXT_READY:
 			// correct volume should be displayed even when no event is received
-			pa_context_get_sink_info_by_name(c, "@DEFAULT_SINK@", volume, NULL);
+			pa_context_get_sink_info_by_name(c, "@DEFAULT_SINK@", volume, pdata);
 
-			pa_context_set_subscribe_callback(pa_con.context, subscribe_cb, NULL);
-			pa_context_subscribe(pa_con.context, PA_SUBSCRIPTION_MASK_SINK, NULL, NULL);
+			pa_context_set_subscribe_callback(pdata->context, subscribe_cb, pdata);
+			pa_context_subscribe(pdata->context, PA_SUBSCRIPTION_MASK_SINK, NULL, NULL);
 			break;
 		case PA_CONTEXT_FAILED:
-			pa_con.failed = 1;
+			pdata->failed = 1;
 			break;
 	}
 }
 
 void subscribe_cb(pa_context *c, pa_subscription_event_type_t t, uint32_t i, void *data) {
-	pa_context_get_sink_info_by_name(c, "@DEFAULT_SINK@", volume, NULL);
+	pa_context_get_sink_info_by_name(c, "@DEFAULT_SINK@", volume, data);
 }
 
 void volume(pa_context *c, const pa_sink_info *info, int eol, void *data) {
+	struct pulse_data *pdata = data;
+	int response = 1;
+
 	if (eol > 0 || !info) return;
 
 	if (info->mute)
-		sprintf(volume_ctx->buf, volume_ctx->fmt2);
+		sprintf(pdata->ctx->buf, pdata->ctx->fmt2);
 	else
-		sprintf(volume_ctx->buf, volume_ctx->fmt1,
+		sprintf(pdata->ctx->buf, pdata->ctx->fmt1,
 				(float) pa_cvolume_avg(&info->volume) / PA_VOLUME_NORM * 100);
 
-	// force a refresh
-	kill(getpid(), SIGUSR1);
+	write(pdata->writefd, &response, sizeof(response));
+}
+
+int inotify_setup(struct inotify_data *idata) {
+	return idata->fd = inotify_init();
+}
+
+void inotify_quit(struct inotify_data *idata) {
+	close(idata->fd);
+}
+
+int inotify_watch_match(struct inotify_watch *w, struct inotify_event *e) {
+	if (w->wd != e->wd || ! w->mask & e->mask)
+		return 0;
+	else if (w->name[0] == '\0' && e->len == 0)
+		return 1;
+	else if (strncmp(w->name, e->name, e->len) == 0)
+		return 1;
+	else
+		return 0;
+}
+
+void inotify_handle(struct inotify_data *idata) {
+	struct inotify_watch *w;
+
+	read(idata->fd, idata->iev, sizeof(idata->iev));
+
+	for (w = idata->iw; w < idata->iw + NWATCHES; w++) {
+		if (inotify_watch_match(w, (struct inotify_event *) idata->iev))
+			w->ctx->func(w->ctx);
+	}
+}
+
+void sleep_setup(struct element *ctx, struct inotify_data *idata) {
+	char path[100];
+	char *dir, *fname;
+
+	struct inotify_watch iw = {
+		.mask = IN_CREATE | IN_DELETE,
+		.ctx = ctx
+	};
+
+	strcpy(path, SLEEP_STATE_PATH);
+	fname = basename(path);
+	dir = dirname(path);
+	strcpy(iw.name, fname);
+
+	iw.wd = inotify_add_watch(idata->fd, dir, iw.mask);
+
+	idata->iw[IN_SLEEP] = iw;
+}
+
+void kblayout_setup(struct element *ctx, struct inotify_data *idata) {
+	struct inotify_watch iw = {
+		.mask = IN_CLOSE_WRITE,
+		.name[0] = '\0',
+		.ctx = ctx
+	};
+
+	iw.wd = inotify_add_watch(idata->fd, KBLAYOUT_PATH, iw.mask);
+
+	idata->iw[IN_KBLAYOUT] = iw;
 }
 
 void sleep_state(struct element *ctx) {
-	FILE *inhibit_sleep_f = fopen("/tmp/inhibit_sleep", "r");
+	FILE *inhibit_sleep_f = fopen(SLEEP_STATE_PATH, "r");
 
 	if (inhibit_sleep_f) {
 		fclose(inhibit_sleep_f);
@@ -147,14 +247,14 @@ void sleep_state(struct element *ctx) {
 	}
 }
 
-void kb_layout(struct element *ctx) {
-	FILE *kb_layout_f = fopen("/tmp/dwl/kblayout", "r");
+void kblayout(struct element *ctx) {
+	FILE *kblayout_f = fopen(KBLAYOUT_PATH, "r");
 	char line[100];
 
-	if (!kb_layout_f) return;
+	if (!kblayout_f) return;
 
-	fscanf(kb_layout_f, "%s", line);
-	fclose(kb_layout_f);
+	fscanf(kblayout_f, "%s", line);
+	fclose(kblayout_f);
 	sprintf(ctx->buf, ctx->fmt1, line);
 }
 
@@ -186,7 +286,7 @@ void memory(struct element *ctx) {
 
 void cpu(struct element *ctx) {
 	FILE *stat_f = fopen("/proc/stat", "r");
-	struct cpu_usage curr;
+	struct cpu_data *prev = ctx->data, curr;
 	unsigned int diff_idle, diff_total;
 	float usage;
 
@@ -195,9 +295,9 @@ void cpu(struct element *ctx) {
 	fclose(stat_f);
 
 	curr.total = curr.user + curr.nice + curr.system + curr.idle;
-	diff_idle = curr.idle - prev.idle;
-	diff_total = curr.total - prev.total;
-	prev = curr;
+	diff_idle = curr.idle - prev->idle;
+	diff_total = curr.total - prev->total;
+	*prev = curr;
 	usage = (float) (diff_total - diff_idle) / (diff_total + 1) * 100;
 
 	if (usage >= 90)
@@ -347,8 +447,8 @@ void date(struct element *ctx) {
 void print_status(void) {
 	char line[500] = "";
 
-	for (struct element *e = elements; e < elements + nr_elems; e++) {
-		if (e->func && !e->dontcall)
+	ELEMS_FOREACH(e) {
+		if (e->call)
 			e->func(e);
 
 		if (*e->buf) {
@@ -366,49 +466,54 @@ void print_status(void) {
 	fflush(stdout);
 }
 
-void refresh(int signal) {
-	// run all functions that don't normally run during the main loop
-	for (struct element *e = elements; e < elements + nr_elems; e++) {
-		if (e->func && e->dontcall == 1)
-			e->func(e);
-	}
-	// running print_status() is not needed, as nanosleep() gets interrupted
-	// upon receiving a signal
-}
-
 void quit(int signal) {
 	stop_program = 1;
 }
 
+void noop(int signal) { }
+
 int main() {
-	struct timespec print_interval = {.tv_sec = 1, .tv_nsec = 0};
+	enum { PULSE, INOTIFY };
+	struct pollfd pfds[2] = { [0 ... 1] = { .fd = -1, .events = POLLIN } };
+	struct pulse_data pdata;
+	struct inotify_data idata;
+	struct cpu_data cdata;
+	int ret;
 
 	signal(SIGINT, quit);
 	signal(SIGTERM, quit);
-	signal(SIGUSR1, refresh);
+	signal(SIGUSR1, noop);
 
-	for (struct element *e = elements; e < elements + nr_elems; e++) {
-		e->buf = malloc(100);
+	pfds[INOTIFY].fd = inotify_setup(&idata);
 
+	ELEMS_FOREACH(e) {
 		if (e->func == volume) {
-			volume_ctx = e;
-			e->dontcall = 2;
-		} else if (e->func == sleep_state || e->func == kb_layout) {
-			e->dontcall = 1;
+			pfds[PULSE].fd = pulse_setup(e, &pdata);
+		} else if (e->func == kblayout) {
+			kblayout_setup(e, &idata);
+		} else if (e->func == sleep_state) {
+			sleep_setup(e, &idata);
+		} else if (e->func == cpu) {
+			e->data = &cdata;
 		}
 	}
 
-	setup_pulse();
-
 	while (!stop_program) {
-		nanosleep(&print_interval, NULL);
-		print_status();
+		ret = poll(pfds, 2, 1000);
+
+		if (ret > 0 && pfds[PULSE].revents & POLLIN) { /* volume was updated */
+			pulse_handle(&pdata);
+			print_status();
+		} else if (ret > 0 && pfds[INOTIFY].revents & POLLIN) { /* watched files changed */
+			inotify_handle(&idata);
+			print_status();
+		} else if (ret == 0) { /* timeout expired */
+			print_status();
+		}
 	}
 
-	cleanup_pulse();
-
-	for (struct element *e = elements; e < elements + nr_elems; e++)
-		free(e->buf);
+	pulse_quit(&pdata);
+	inotify_quit(&idata);
 
 	return 0;
 }

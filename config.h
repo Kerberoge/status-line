@@ -1,14 +1,13 @@
-#define HWMON_PATH			"/sys/class/hwmon/hwmon2/temp1_input"
-#define BATTERY_PATH		"/sys/class/power_supply/BAT0"
-#define WIFI_DEVICE			"wlo1"
-#define SLEEP_STATE_PATH	"/tmp/inhibit_sleep"
-#define KBLAYOUT_PATH		"/tmp/dwl/kblayout"
+const char *hwmon_path			= "/sys/class/hwmon/hwmon2/temp1_input";
+const char *battery_path		= "/sys/class/power_supply/BAT0";
+const char *wifi_device			= "wlo1";
+const char *sleep_state_path	= "/tmp/inhibit_sleep";
+const char *kblayout_path		= "/tmp/dwl/kblayout";
+const char *separator			= "     ";
 
 #define FG_AC	"37bf7c"
 #define FG_WN	"ffff00"
 #define FG_UR	"ff5050"
-
-#define SEP		"     "
 
 struct element elements[] = {
 	{ volume,		0,	"^fg(" FG_AC ")V^fg() %.0f%%",							/* normal */

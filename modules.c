@@ -175,20 +175,19 @@ void battery(struct element *ctx) {
 }
 
 int wifi_cb(struct nl_msg *msg, void *data) {
-	struct element **ctx = data;
-	char *ssid;
 	struct nlattr *attrs[NL80211_ATTR_MAX + 1];
 	struct genlmsghdr *gnlh = nlmsg_data(nlmsg_hdr(msg));
+	char *ssid = data;
+	int len;
 
 	if (nla_parse(attrs, NL80211_ATTR_MAX, genlmsg_attrdata(gnlh, 0),
 			genlmsg_attrlen(gnlh, 0), NULL) < 0)
 		return NL_SKIP;
 
 	if (attrs[NL80211_ATTR_SSID]) {
-		ssid = nla_get_string(attrs[NL80211_ATTR_SSID]);
-		sprintf((*ctx)->buf, (*ctx)->fmt1, ssid);
-	} else {
-		sprintf((*ctx)->buf, (*ctx)->fmt2);
+		len = nla_len(attrs[NL80211_ATTR_SSID]);
+		memcpy(ssid, nla_data(attrs[NL80211_ATTR_SSID]), len);
+		ssid[len] = '\0';
 	}
 
 	return NL_STOP;
@@ -196,6 +195,8 @@ int wifi_cb(struct nl_msg *msg, void *data) {
 
 void wifi(struct element *ctx) {
 	struct nl_sock *sk = nl_socket_alloc();
+	char ssid[100] = {0};
+
 	if (genl_connect(sk) < 0) {
 		nl_socket_free(sk);
 		return;
@@ -211,8 +212,13 @@ void wifi(struct element *ctx) {
 			0, 0, NL80211_CMD_GET_INTERFACE, 0);
 	nla_put_u32(msg, NL80211_ATTR_IFINDEX, if_nametoindex(wifi_device));
 
-	nl_socket_modify_cb(sk, NL_CB_VALID, NL_CB_CUSTOM, wifi_cb, &ctx);
+	nl_socket_modify_cb(sk, NL_CB_VALID, NL_CB_CUSTOM, wifi_cb, ssid);
 	nl_send_sync(sk, msg);
+
+	if (ssid[0])
+		sprintf(ctx->buf, ctx->fmt1, ssid);
+	else
+		sprintf(ctx->buf, ctx->fmt2);
 
 	nl_socket_free(sk);
 }

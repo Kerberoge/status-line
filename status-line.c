@@ -68,8 +68,8 @@ int main() {
 			pulse_handle(&pdata);
 			print_status();
 		} else if (ret > 0 && pfds[INOTIFY].revents & POLLIN) { /* watched files changed */
-			inotify_handle(&idata);
-			print_status();
+			if (inotify_handle(&idata))
+				print_status();
 		} else if (ret == 0) { /* timeout expired */
 			print_status();
 		}

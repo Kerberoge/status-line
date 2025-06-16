@@ -17,6 +17,6 @@ struct inotify_data {
 
 int inotify_setup(struct inotify_data *idata);
 void inotify_quit(struct inotify_data *idata);
-void inotify_handle(struct inotify_data *idata);
+int inotify_handle(struct inotify_data *idata);
 void sleep_setup(struct element *ctx, struct inotify_data *idata);
 void kblayout_setup(struct element *ctx, struct inotify_data *idata);

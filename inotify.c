@@ -31,15 +31,19 @@ int inotify_watch_match(struct inotify_watch *w, struct inotify_event *e) {
 		return 0;
 }
 
-void inotify_handle(struct inotify_data *idata) {
+int inotify_handle(struct inotify_data *idata) {
 	struct inotify_watch *w;
 
 	read(idata->fd, idata->iev, sizeof(idata->iev));
 
 	for (w = idata->iw; w < idata->iw + NWATCHES; w++) {
-		if (inotify_watch_match(w, (struct inotify_event *) idata->iev))
+		if (inotify_watch_match(w, (struct inotify_event *) idata->iev)) {
 			w->ctx->func(w->ctx);
+			return 1;
+		}
 	}
+
+	return 0;
 }
 
 void sleep_setup(struct element *ctx, struct inotify_data *idata) {

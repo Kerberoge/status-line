@@ -23,7 +23,7 @@ struct element elements[] = {
 	{ battery,	"^fg(" FG_AC ")B^fg()  %u%%",						/* normal */
 				"^fg(" FG_AC ")Ch^fg()  %u%%",						/* charging */
 				"^fg(" FG_AC ")B^fg()  ^fg(" FG_UR ")%u%%^fg()" },	/* low battery */
-	{ wifi,		"^fg(" FG_AC ")W^fg()  %s",							/* connected */
-				"^fg(" FG_UR ")disconnected^fg()" },				/* disconnected */
+	{ wifi,		"^fg(" FG_AC ")W^fg()  %s",									/* connected */
+				"^fg(" FG_AC ")W^fg()  ^fg(" FG_UR ")disconnected^fg()" },	/* disconnected */
 	{ date,		"^fg(" FG_AC ")D^fg()  %s %02d-%02d  %d:%02d" }
 };

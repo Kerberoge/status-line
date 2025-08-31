@@ -57,7 +57,7 @@ void volume(pa_context *c, const pa_sink_info *info, int eol, void *data);
 
 int inotify_setup(struct element *ctx, struct inotify_data *idata);
 void inotify_quit(struct inotify_data *idata);
-void inotify_handle(struct inotify_data *idata);
+int inotify_handle(struct inotify_data *idata);
 void sleep_state(struct element *ctx);
 
 void memory(struct element *ctx);
@@ -187,13 +187,17 @@ void inotify_quit(struct inotify_data *idata) {
 	close(idata->fd);
 }
 
-void inotify_handle(struct inotify_data *idata) {
+int inotify_handle(struct inotify_data *idata) {
 	struct inotify_event *e = (struct inotify_event *) idata->iev;
 
 	read(idata->fd, idata->iev, sizeof(idata->iev));
 
-	if (strncmp(idata->name, e->name, e->len) == 0)
+	if (strncmp(idata->name, e->name, e->len) == 0) {
 		idata->ctx->func(idata->ctx);
+		return 1;
+	}
+
+	return 0;
 }
 
 void sleep_state(struct element *ctx) {
@@ -431,8 +435,8 @@ int main() {
 			pulse_handle(&pdata);
 			print_status();
 		} else if (ret > 0 && pfds[INOTIFY].revents & POLLIN) { /* watched files changed */
-			inotify_handle(&idata);
-			print_status();
+			if (inotify_handle(&idata))
+				print_status();
 		} else if (ret == 0) { /* timeout expired */
 			print_status();
 		}

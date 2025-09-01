@@ -3,6 +3,7 @@
 #include <string.h>
 #include <signal.h>
 #include <unistd.h>
+#include <time.h>
 #include <libgen.h>
 #include <sys/inotify.h>
 #include <pulse/pulseaudio.h>	/* next 2 are for the volume module */
@@ -406,9 +407,23 @@ void quit(int signal) {
 
 void noop(int signal) { }
 
+uint32_t calc_diff_ms(struct timespec *start, struct timespec *end) {
+	struct timespec diff;
+	uint32_t diff_ms;
+
+	diff.tv_sec = end->tv_sec - start->tv_sec;
+	diff.tv_nsec = end->tv_nsec - start->tv_nsec;
+	diff_ms = diff.tv_sec * 1000 + diff.tv_nsec / 1e6;
+
+	return diff_ms;
+}
+
 int main() {
 	enum { PULSE, INOTIFY };
 	struct pollfd pfds[2] = { [0 ... 1] = { .fd = -1, .events = POLLIN } };
+	struct timespec start, end;
+	const int interval = 1000; /* ms */
+	int time_remaining = interval;
 	struct pulse_data pdata;
 	struct inotify_data idata;
 	struct cpu_data cdata;
@@ -429,7 +444,12 @@ int main() {
 	}
 
 	while (!stop_program) {
-		ret = poll(pfds, 2, 1000);
+		clock_gettime(CLOCK_MONOTONIC, &start);
+		ret = poll(pfds, 2, time_remaining);
+		clock_gettime(CLOCK_MONOTONIC, &end);
+
+		time_remaining -= calc_diff_ms(&start, &end);
+		if (time_remaining <= 0) time_remaining = interval;
 
 		if (ret > 0 && pfds[PULSE].revents & POLLIN) { /* volume was updated */
 			pulse_handle(&pdata);

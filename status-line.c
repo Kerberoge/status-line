@@ -172,6 +172,9 @@ int inotify_setup(struct element *ctx, struct inotify_data *idata) {
 	strcpy(idata->name, fname);
 	idata->ctx = ctx;
 
+	/* correct sleep setting should be displayed even if it has never been toggled */
+	sleep_state(ctx);
+
 	return idata->fd;
 }
 

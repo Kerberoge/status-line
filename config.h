@@ -7,23 +7,26 @@
 #define FG_WN	"ffff00"
 #define FG_UR	"ff5050"
 
+#define C(color)	"<span color='#" color "'>"
+#define CEND		"</span>"
+
 #define SEP		"     "
 
 struct element elements[] = {
-	{ volume,		0,	"^fg(" FG_AC ")V^fg() %.0f%%",							/* normal */
-						"^fg(" FG_AC ")V^fg() muted" },							/* muted */
-	{ sleep_state,	0,	"",														/* normal */
-						"^fg(" FG_WN ")INSOMNIA^fg()" },						/* sleep inhibited */
-	{ memory,		1,	"^fg(" FG_AC ")M^fg() %.0fM",							/* < 1GB */
-						"^fg(" FG_AC ")M^fg() %.1fG" },							/* > 1GB */
-	{ cpu,			1,	"^fg(" FG_AC ")C^fg() %02.0f%%",						/* normal */
-						"^fg(" FG_AC ")C^fg() ^fg(" FG_UR ")%02.0f%%^fg()" },	/* high */
-	{ temperature,	1,	"^fg(" FG_AC ")T^fg() %d°C",							/* normal */
-						"^fg(" FG_AC ")T^fg() ^fg(" FG_UR ")%d°C^fg()" },		/* high */
-	{ battery,		1,	"^fg(" FG_AC ")B^fg() %u%%",							/* normal */
-						"^fg(" FG_AC ")Ch^fg() %u%%",							/* charging */
-						"^fg(" FG_AC ")B^fg() ^fg(" FG_UR ")%u%%^fg()" },		/* low battery */
-	{ wifi,			1,	"^fg(" FG_AC ")W^fg() %s",								/* connected */
-						"^fg(" FG_AC ")W^fg(" FG_UR ") disconnected^fg()" },	/* disconnected */
-	{ date,			1,	"^fg(" FG_AC ")D^fg() %s %02d-%02d  %d:%02d" }
+	{ volume,		0,	C(FG_AC) "V " CEND "%.0f%%",						/* normal */
+						C(FG_AC) "V " CEND "muted" },						/* muted */
+	{ sleep_state,	0,	"",													/* normal */
+						C(FG_WN) "INSOMNIA" CEND },							/* sleep inhibited */
+	{ memory,		1,	C(FG_AC) "M " CEND "%.0fM",							/* < 1GB */
+						C(FG_AC) "M " CEND "%.1fG" },						/* > 1GB */
+	{ cpu,			1,	C(FG_AC) "C " CEND "%02.0f%%",						/* normal */
+						C(FG_AC) "C " CEND C(FG_UR) "%02.0f%%" CEND },		/* high */
+	{ temperature,	1,	C(FG_AC) "T " CEND "%d°C",							/* normal */
+						C(FG_AC) "T " CEND C(FG_UR) "%d°C" CEND },			/* high */
+	{ battery,		1,	C(FG_AC) "B " CEND "%u%%",							/* normal */
+						C(FG_AC) "Ch " CEND "%u%%",							/* charging */
+						C(FG_AC) "B " CEND C(FG_UR) "%u%%" CEND },			/* low battery */
+	{ wifi,			1,	C(FG_AC) "W " CEND "%s",							/* connected */
+						C(FG_AC) "W " CEND C(FG_UR) "disconnected" CEND },	/* disconnected */
+	{ date,			1,	C(FG_AC) "D " CEND "%s %02d-%02d  %d:%02d" }
 };

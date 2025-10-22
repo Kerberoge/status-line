@@ -387,15 +387,12 @@ void print_status(void) {
 			e->func(e);
 
 		if (*e->buf) {
-			if (!line[0]) // first element
-				strcat(line, " ");
-			else
+			if (line[0]) /* don't append at the start */
 				strcat(line, SEP);
 
 			strcat(line, e->buf);
 		}
 	}
-	strcat(line, " ");
 
 	printf("%s\n", line);
 	fflush(stdout);

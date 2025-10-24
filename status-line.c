@@ -349,34 +349,10 @@ void wifi(struct element *ctx) {
 void date(struct element *ctx) {
 	time_t t = time(NULL);
 	struct tm tm = *localtime(&t);
-	char *day;
-
-	switch (tm.tm_wday) {
-		case 0:
-			day = "Sun";
-			break;
-		case 1:
-			day = "Mon";
-			break;
-		case 2:
-			day = "Tue";
-			break;
-		case 3:
-			day = "Wed";
-			break;
-		case 4:
-			day = "Thu";
-			break;
-		case 5:
-			day = "Fri";
-			break;
-		case 6:
-			day = "Sat";
-			break;
-	}
+	const char *weekdays[] = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
 
 	sprintf(ctx->buf, ctx->fmt1,
-			day, tm.tm_mday, tm.tm_mon + 1, tm.tm_hour, tm.tm_min);
+			weekdays[tm.tm_wday], tm.tm_mday, tm.tm_mon + 1, tm.tm_hour, tm.tm_min);
 }
 
 void print_status(void) {

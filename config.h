@@ -2,31 +2,37 @@
 #define BATTERY_PATH		"/sys/class/power_supply/BAT0"
 #define WIFI_DEVICE			"wlo1"
 #define SLEEP_STATE_PATH	"/tmp/inhibit_sleep"
-
-#define FG_AC	"37bf7c"
-#define FG_WN	"ffff00"
-#define FG_UR	"ff5050"
-
-#define C(color)	"<span color='#" color "'>"
-#define CEND		"</span>"
+#define SWAY_CONFIG_PATH	HOME "/.config/sway/config"
 
 #define SEP		"     "
 
+struct {
+	char warning[8], urgent[8], accent[8];
+} colors;
+
+/* start and end of colored text */
+#define CSTART(color)	"<span color='", color, "'>"
+#define CEND			"</span>"
+
+#define WN	CSTART(colors.warning)
+#define UR	CSTART(colors.urgent)
+#define AC	CSTART(colors.accent)
+
 struct element elements[] = {
-	{ volume,		0,	C(FG_AC) "V " CEND "%.0f%%",						/* normal */
-						C(FG_AC) "V " CEND "muted" },						/* muted */
-	{ sleep_state,	0,	"",													/* normal */
-						C(FG_WN) "INSOMNIA" CEND },							/* sleep inhibited */
-	{ memory,		1,	C(FG_AC) "M " CEND "%.0fM",							/* < 1GB */
-						C(FG_AC) "M " CEND "%.1fG" },						/* > 1GB */
-	{ cpu,			1,	C(FG_AC) "C " CEND "%02.0f%%",						/* normal */
-						C(FG_AC) "C " CEND C(FG_UR) "%02.0f%%" CEND },		/* high */
-	{ temperature,	1,	C(FG_AC) "T " CEND "%d°C",							/* normal */
-						C(FG_AC) "T " CEND C(FG_UR) "%d°C" CEND },			/* high */
-	{ battery,		1,	C(FG_AC) "B " CEND "%u%%",							/* normal */
-						C(FG_AC) "Ch " CEND "%u%%",							/* charging */
-						C(FG_AC) "B " CEND C(FG_UR) "%u%%" CEND },			/* low battery */
-	{ wifi,			1,	C(FG_AC) "W " CEND "%s",							/* connected */
-						C(FG_AC) "W " CEND C(FG_UR) "disconnected" CEND },	/* disconnected */
-	{ date,			1,	C(FG_AC) "D " CEND "%s %02d-%02d  %d:%02d" }
+	{ volume,		0,	{ AC, "V ", CEND, "%.0f%%" },					/* normal */
+						{ AC, "V ", CEND, "muted" } },					/* muted */
+	{ sleep_state,	0,	{ },  											/* normal */
+						{ WN, "INSOMNIA", CEND } },						/* sleep inhibited */
+	{ memory,		1,	{ AC, "M ", CEND, "%.0fM" },					/* < 1GB */
+						{ AC, "M ", CEND, "%.1fG" } },					/* > 1GB */
+	{ cpu,			1,	{ AC, "C ", CEND, "%02.0f%%" },					/* normal */
+						{ AC, "C ", CEND, UR, "%02.0f%%", CEND } },		/* high */
+	{ temperature,	1,	{ AC, "T ", CEND, "%d°C" },						/* normal */
+						{ AC, "T ", CEND, UR, "%d°C", CEND } },			/* high */
+	{ battery,		1,	{ AC, "B ", CEND, "%u%%" },						/* normal */
+						{ AC, "Ch ", CEND, "%u%%" },					/* charging */
+						{ AC, "B ", CEND, UR, "%u%%", CEND } },			/* low battery */
+	{ wifi,			1,	{ AC, "W ", CEND, "%s" },						/* connected */
+						{ AC, "W ", CEND, UR, "disconnected", CEND } },	/* disconnected */
+	{ date,			1,	{ AC, "D ", CEND, "%s %02d-%02d  %d:%02d" } }
 };

@@ -24,7 +24,8 @@
 struct element {
 	void (*func)();
 	int call;
-	char *fmt1, *fmt2, *fmt3;
+	const char *ufmt1[10], *ufmt2[10], *ufmt3[10];	/* defined in config.h */
+	char fmt1[100], fmt2[100], fmt3[100];			/* filled after parsing ufmt */
 	char buf[100];
 	void *data;
 };
@@ -73,6 +74,7 @@ void print_status(void);
 void quit(int signal);
 
 #include "config.h"
+#include "sway.h"
 
 int stop_program = 0;
 
@@ -380,6 +382,14 @@ void quit(int signal) {
 
 void noop(int signal) { }
 
+void flatten_str_arr(char *dest, size_t dest_size, const char* src_arr[], size_t src_size) {
+	const char **ps;
+
+	dest[0] = '\0';
+	for (ps = src_arr; ps < src_arr + src_size && *ps; ps++)
+		strncat(dest, *ps, dest_size - strlen(dest) - 1);
+}
+
 uint32_t calc_diff_ms(struct timespec *start, struct timespec *end) {
 	struct timespec diff;
 	uint32_t diff_ms;
@@ -406,7 +416,15 @@ int main() {
 	signal(SIGTERM, quit);
 	signal(SIGUSR1, noop);
 
+	if (get_sway_colors(SWAY_CONFIG_PATH) == -1) {
+		fprintf(stderr, "Error: Could not retrieve all colors from Sway's config file\n");
+		exit(1);
+	}
+
 	ELEMS_FOREACH(e) {
+		flatten_str_arr(e->fmt1, sizeof(e->fmt1), e->ufmt1, sizeof(e->ufmt1) / sizeof(char *));
+		flatten_str_arr(e->fmt2, sizeof(e->fmt2), e->ufmt2, sizeof(e->ufmt2) / sizeof(char *));
+		flatten_str_arr(e->fmt3, sizeof(e->fmt3), e->ufmt3, sizeof(e->ufmt3) / sizeof(char *));
 		if (e->func == volume) {
 			pfds[PULSE].fd = pulse_setup(e, &pdata);
 		} else if (e->func == sleep_state) {

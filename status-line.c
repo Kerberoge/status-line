@@ -51,56 +51,54 @@ struct cpu_data {
 	unsigned int user, nice, system, idle, total;
 };
 
-void create_pulse_context(struct pulse_data *pd);
-void *pulse_worker(void *data);
-void context_state_cb(pa_context *c, void *data);
-void subscribe_cb(pa_context *c, pa_subscription_event_type_t t, uint32_t i, void *data);
-void volume(pa_context *c, const pa_sink_info *info, int eol, void *data);
-
-int inotify_setup(struct element *ctx, struct inotify_data *idata);
-void inotify_quit(struct inotify_data *idata);
-int inotify_handle(struct inotify_data *idata);
 void sleep_state(struct element *ctx);
-
+void volume(pa_context *c, const pa_sink_info *info, int eol, void *data);
 void memory(struct element *ctx);
 void cpu(struct element *ctx);
 void temperature(struct element *ctx);
 void battery(struct element *ctx);
-int wifi_cb(struct nl_msg *msg, void *data);
 void wifi(struct element *ctx);
 void date(struct element *ctx);
-
-void print_status(void);
-void quit(int signal);
 
 #include "config.h"
 #include "sway.h"
 
 int stop_program = 0;
 
-int pulse_setup(struct element *ctx, struct pulse_data *pdata) {
-	int dummy_pipe[2];
+void volume(pa_context *c, const pa_sink_info *info, int eol, void *data) {
+	struct pulse_data *pdata = data;
+	int response = 1;
 
-	pipe(dummy_pipe);
-	pdata->readfd = dummy_pipe[0];
-	pdata->writefd = dummy_pipe[1];
-	pdata->ctx = ctx;
-	pthread_create(&pdata->thread, NULL, pulse_worker, pdata);
+	if (eol > 0 || !info) return;
 
-	return pdata->readfd;
+	if (info->mute)
+		sprintf(pdata->ctx->buf, pdata->ctx->fmt2);
+	else
+		sprintf(pdata->ctx->buf, pdata->ctx->fmt1,
+				(float) pa_cvolume_avg(&info->volume) / PA_VOLUME_NORM * 100);
+
+	write(pdata->writefd, &response, sizeof(response));
 }
 
-void pulse_quit(struct pulse_data *pdata) {
-	pa_mainloop_quit(pdata->mainloop, 0);
-	pthread_join(pdata->thread, NULL);
-	close(pdata->readfd);
-	close(pdata->writefd);
+void subscribe_cb(pa_context *c, pa_subscription_event_type_t t, uint32_t i, void *data) {
+	pa_context_get_sink_info_by_name(c, "@DEFAULT_SINK@", volume, data);
 }
 
-void pulse_handle(struct pulse_data *pdata) {
-	int ret;
+void context_state_cb(pa_context *c, void *data) {
+	struct pulse_data *pdata = data;
 
-	read(pdata->readfd, &ret, sizeof(ret));
+	switch (pa_context_get_state(c)) {
+		case PA_CONTEXT_READY:
+			/* correct volume should be displayed even when no event is received */
+			pa_context_get_sink_info_by_name(c, "@DEFAULT_SINK@", volume, pdata);
+
+			pa_context_set_subscribe_callback(pdata->context, subscribe_cb, pdata);
+			pa_context_subscribe(pdata->context, PA_SUBSCRIPTION_MASK_SINK, NULL, NULL);
+			break;
+		case PA_CONTEXT_FAILED:
+			pdata->failed = 1;
+			break;
+	}
 }
 
 void create_pulse_context(struct pulse_data *pdata) {
@@ -134,40 +132,29 @@ void *pulse_worker(void *data) {
 	return NULL;
 }
 
-void context_state_cb(pa_context *c, void *data) {
-	struct pulse_data *pdata = data;
+int pulse_setup(struct element *ctx, struct pulse_data *pdata) {
+	int dummy_pipe[2];
 
-	switch (pa_context_get_state(c)) {
-		case PA_CONTEXT_READY:
-			/* correct volume should be displayed even when no event is received */
-			pa_context_get_sink_info_by_name(c, "@DEFAULT_SINK@", volume, pdata);
+	pipe(dummy_pipe);
+	pdata->readfd = dummy_pipe[0];
+	pdata->writefd = dummy_pipe[1];
+	pdata->ctx = ctx;
+	pthread_create(&pdata->thread, NULL, pulse_worker, pdata);
 
-			pa_context_set_subscribe_callback(pdata->context, subscribe_cb, pdata);
-			pa_context_subscribe(pdata->context, PA_SUBSCRIPTION_MASK_SINK, NULL, NULL);
-			break;
-		case PA_CONTEXT_FAILED:
-			pdata->failed = 1;
-			break;
-	}
+	return pdata->readfd;
 }
 
-void subscribe_cb(pa_context *c, pa_subscription_event_type_t t, uint32_t i, void *data) {
-	pa_context_get_sink_info_by_name(c, "@DEFAULT_SINK@", volume, data);
+void pulse_quit(struct pulse_data *pdata) {
+	pa_mainloop_quit(pdata->mainloop, 0);
+	pthread_join(pdata->thread, NULL);
+	close(pdata->readfd);
+	close(pdata->writefd);
 }
 
-void volume(pa_context *c, const pa_sink_info *info, int eol, void *data) {
-	struct pulse_data *pdata = data;
-	int response = 1;
+void pulse_handle(struct pulse_data *pdata) {
+	int ret;
 
-	if (eol > 0 || !info) return;
-
-	if (info->mute)
-		sprintf(pdata->ctx->buf, pdata->ctx->fmt2);
-	else
-		sprintf(pdata->ctx->buf, pdata->ctx->fmt1,
-				(float) pa_cvolume_avg(&info->volume) / PA_VOLUME_NORM * 100);
-
-	write(pdata->writefd, &response, sizeof(response));
+	read(pdata->readfd, &ret, sizeof(ret));
 }
 
 int inotify_setup(struct element *ctx, struct inotify_data *idata) {

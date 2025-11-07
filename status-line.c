@@ -12,6 +12,7 @@
 #include <linux/nl80211.h>
 #include <netlink/genl/genl.h>
 #include <netlink/genl/ctrl.h>
+#include "util.h"
 
 #define MB	1048576
 #define GB	1073741824
@@ -19,7 +20,6 @@
 #define ELEMS_FOREACH(it)	for (struct element *it = elements; \
 								it < elements + sizeof(elements) / sizeof(struct element); \
 								it++)
-#define PREFIX(str, prefix)	!strncmp(str, prefix, strlen(prefix))
 
 struct element {
 	void (*func)();

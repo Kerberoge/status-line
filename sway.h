@@ -1,9 +1,6 @@
 #include <stdlib.h>
 #include <string.h>
-#include <sys/param.h>	/* MIN() */
-
-#define PREFIX(str, prefix)		!strncmp(str, prefix, strlen(prefix))
-#define WHITESPACE(c)			((c) == ' ' || (c) == '\t')
+#include "util.h"
 
 int get_var(char *dest, size_t dest_size, const char *varname,
 		const char *file_contents, size_t file_size) {

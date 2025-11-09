@@ -61,7 +61,7 @@ void wifi(struct element *ctx);
 void date(struct element *ctx);
 
 #include "config.h"
-#include "sway.h"
+#include "colors.h"
 
 int stop_program = 0;
 

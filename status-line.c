@@ -367,8 +367,6 @@ void quit(int signal) {
 	stop_program = 1;
 }
 
-void noop(int signal) { }
-
 void flatten_str_arr(char *dest, size_t dest_size, const char* src_arr[], size_t src_size) {
 	const char **ps;
 
@@ -401,7 +399,6 @@ int main() {
 
 	signal(SIGINT, quit);
 	signal(SIGTERM, quit);
-	signal(SIGUSR1, noop);
 
 	if (get_sway_colors(SWAY_CONFIG_PATH) == -1) {
 		fprintf(stderr, "Error: Could not retrieve all colors from Sway's config file\n");

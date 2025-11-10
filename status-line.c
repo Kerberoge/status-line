@@ -151,10 +151,12 @@ void pulse_quit(struct pulse_data *pdata) {
 	close(pdata->writefd);
 }
 
-void pulse_handle(struct pulse_data *pdata) {
+int pulse_handle(struct pulse_data *pdata) {
 	int ret;
 
 	read(pdata->readfd, &ret, sizeof(ret));
+
+	return 1; /* always successful */
 }
 
 int inotify_setup(struct element *ctx, struct inotify_data *idata) {
@@ -409,13 +411,12 @@ int main() {
 		flatten_str_arr(e->fmt1, sizeof(e->fmt1), e->ufmt1, sizeof(e->ufmt1) / sizeof(char *));
 		flatten_str_arr(e->fmt2, sizeof(e->fmt2), e->ufmt2, sizeof(e->ufmt2) / sizeof(char *));
 		flatten_str_arr(e->fmt3, sizeof(e->fmt3), e->ufmt3, sizeof(e->ufmt3) / sizeof(char *));
-		if (e->func == volume) {
+		if (e->func == volume)
 			pfds[PULSE].fd = pulse_setup(e, &pdata);
-		} else if (e->func == sleep_state) {
+		else if (e->func == sleep_state)
 			pfds[INOTIFY].fd = inotify_setup(e, &idata);
-		} else if (e->func == cpu) {
+		else if (e->func == cpu)
 			e->data = &cdata;
-		}
 	}
 
 	while (!stop_program) {
@@ -426,15 +427,10 @@ int main() {
 		time_remaining -= calc_diff_ms(&start, &end);
 		if (time_remaining <= 0) time_remaining = interval;
 
-		if (ret > 0 && pfds[PULSE].revents & POLLIN) { /* volume was updated */
-			pulse_handle(&pdata);
+		if (ret == 0 || ret > 0 && (
+				pfds[PULSE].revents & POLLIN && pulse_handle(&pdata) ||
+				pfds[INOTIFY].revents & POLLIN && inotify_handle(&idata) ))
 			print_status();
-		} else if (ret > 0 && pfds[INOTIFY].revents & POLLIN) { /* watched files changed */
-			if (inotify_handle(&idata))
-				print_status();
-		} else if (ret == 0) { /* timeout expired */
-			print_status();
-		}
 	}
 
 	pulse_quit(&pdata);

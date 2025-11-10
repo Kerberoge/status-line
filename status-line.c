@@ -442,9 +442,12 @@ int main() {
 			print_status();
 	}
 
-	pulse_quit(&pdata);
-	inotify_quit(&idata);
-	kblayout_quit(&kdata);
+	if (pfds[PULSE].fd != -1)
+		pulse_quit(&pdata);
+	if (pfds[INOTIFY].fd != -1)
+		inotify_quit(&idata);
+	if (pfds[KBLAYOUT].fd != -1)
+		kblayout_quit(&kdata);
 
 	return 0;
 }

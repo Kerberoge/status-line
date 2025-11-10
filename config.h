@@ -21,6 +21,7 @@ struct {
 struct element elements[] = {
 	{ volume,		0,	{ AC, "V ", CEND, "%.0f%%" },					/* normal */
 						{ AC, "V ", CEND, "muted" } },					/* muted */
+	{ kblayout,		0,	{ AC, "K ", CEND, "%s" } },
 	{ sleep_state,	0,	{ },  											/* normal */
 						{ WN, "INSOMNIA", CEND } },						/* sleep inhibited */
 	{ memory,		1,	{ AC, "M ", CEND, "%.0fM" },					/* < 1GB */

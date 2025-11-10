@@ -60,6 +60,7 @@ void battery(struct element *ctx);
 void wifi(struct element *ctx);
 void date(struct element *ctx);
 
+#include "kblayout.h"
 #include "config.h"
 #include "colors.h"
 
@@ -392,13 +393,14 @@ uint32_t calc_diff_ms(struct timespec *start, struct timespec *end) {
 }
 
 int main() {
-	enum { PULSE, INOTIFY };
-	struct pollfd pfds[2] = { [0 ... 1] = { .fd = -1, .events = POLLIN } };
+	enum { PULSE, INOTIFY, KBLAYOUT };
+	struct pollfd pfds[3] = { [0 ... 2] = { .fd = -1, .events = POLLIN } };
 	struct timespec start, end;
 	const int interval = 1000; /* ms */
 	int time_remaining = interval;
 	struct pulse_data pdata;
 	struct inotify_data idata;
+	struct kblayout_data kdata;
 	struct cpu_data cdata;
 	int ret;
 
@@ -418,6 +420,8 @@ int main() {
 			pfds[PULSE].fd = pulse_setup(e, &pdata);
 		else if (e->func == sleep_state)
 			pfds[INOTIFY].fd = inotify_setup(e, &idata);
+		else if (e->func == kblayout)
+			pfds[KBLAYOUT].fd = kblayout_setup(e, &kdata);
 		else if (e->func == cpu)
 			e->data = &cdata;
 	}
@@ -425,7 +429,7 @@ int main() {
 	print_status();
 	while (!stop_program) {
 		clock_gettime(CLOCK_MONOTONIC, &start);
-		ret = poll(pfds, 2, time_remaining);
+		ret = poll(pfds, 3, time_remaining);
 		clock_gettime(CLOCK_MONOTONIC, &end);
 
 		time_remaining -= calc_diff_ms(&start, &end);
@@ -433,12 +437,14 @@ int main() {
 
 		if (ret == 0 || ret > 0 && (
 				pfds[PULSE].revents & POLLIN && pulse_handle(&pdata) ||
-				pfds[INOTIFY].revents & POLLIN && inotify_handle(&idata) ))
+				pfds[INOTIFY].revents & POLLIN && inotify_handle(&idata) ||
+				pfds[KBLAYOUT].revents & POLLIN && kblayout_handle(&kdata) ))
 			print_status();
 	}
 
 	pulse_quit(&pdata);
 	inotify_quit(&idata);
+	kblayout_quit(&kdata);
 
 	return 0;
 }

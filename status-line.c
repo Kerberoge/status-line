@@ -419,6 +419,7 @@ int main() {
 			e->data = &cdata;
 	}
 
+	print_status();
 	while (!stop_program) {
 		clock_gettime(CLOCK_MONOTONIC, &start);
 		ret = poll(pfds, 2, time_remaining);

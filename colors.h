@@ -2,6 +2,10 @@
 #include <string.h>
 #include "util.h"
 
+struct {
+	char warning[8], urgent[8], accent[8];
+} colors;
+
 int get_var(char *dest, size_t dest_size, const char *varname,
 		const char *file_contents, size_t file_size) {
 	const char *pos = file_contents, *nlpos;

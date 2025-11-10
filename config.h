@@ -6,10 +6,6 @@
 
 #define SEP		"     "
 
-struct {
-	char warning[8], urgent[8], accent[8];
-} colors;
-
 /* start and end of colored text */
 #define CSTART(color)	"<span color='", color, "'>"
 #define CEND			"</span>"

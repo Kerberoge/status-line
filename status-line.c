@@ -61,8 +61,8 @@ void wifi(struct element *ctx);
 void date(struct element *ctx);
 
 #include "kblayout.h"
-#include "config.h"
 #include "colors.h"
+#include "config.h"
 
 int stop_program = 0;
 

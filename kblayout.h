@@ -78,7 +78,7 @@ char *kblayout_desc_to_short(const char *desc) {
 	 */
 	FILE *f;
 	char *buffer = NULL; /* allocated by getline() */
-	size_t buf_len = 0, line_len, short_name_len = 0;
+	size_t buf_len = 0, line_len, desc_len = strlen(desc), short_name_len = 0;
 	char *sw; /* second word in the line */
 	char *short_name = NULL;
 
@@ -95,7 +95,9 @@ char *kblayout_desc_to_short(const char *desc) {
 		if (!*sw) /* reached end of line */
 			continue;
 
-		if (strncmp(sw, desc, MIN(buffer + line_len - sw, strlen(desc))) == 0) {
+		/* last char of the line is a newline, which is not part
+		 * of the description; hence -1 */
+		if (buffer + line_len - 1 - sw == desc_len && strncmp(sw, desc, desc_len) == 0) {
 			for (; !WHITESPACE(*(buffer + short_name_len)); short_name_len++);
 			short_name = strndup(buffer, short_name_len);
 			break;

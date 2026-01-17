@@ -1,4 +1,4 @@
-#define HWMON_PATH			"/sys/class/hwmon/hwmon2/temp1_input"
+#define HWMON_PATH			"/sys/class/hwmon/hwmon3/temp1_input"
 #define BATTERY_PATH		"/sys/class/power_supply/BAT0"
 #define WIFI_DEVICE			"wlo1"
 #define SLEEP_STATE_PATH	"/tmp/inhibit_sleep"

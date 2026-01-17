@@ -15,6 +15,6 @@ clean:
 	rm status-line
 
 install:
-	install -s -D -t $(PREFIX)/bin status-line
+	install -s -D -t $(PREFIX)/bin/desktop status-line
 
 .PHONY: clean

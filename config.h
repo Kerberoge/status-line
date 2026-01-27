@@ -26,9 +26,9 @@ struct element elements[] = {
 						{ AC, "C ", CEND, UR, "%02.0f%%", CEND } },		/* high */
 	{ temperature,	1,	{ AC, "T ", CEND, "%d°C" },						/* normal */
 						{ AC, "T ", CEND, UR, "%d°C", CEND } },			/* high */
-	{ battery,		1,	{ AC, "B ", CEND, "%u%%" },						/* normal */
-						{ AC, "Ch ", CEND, "%u%%" },					/* charging */
-						{ AC, "B ", CEND, UR, "%u%%", CEND } },			/* low battery */
+	{ battery,		1,	{ AC, "B ", CEND, "%.1fWh" },					/* normal */
+						{ AC, "Ch ", CEND, "%.1fWh" },					/* charging */
+						{ AC, "B ", CEND, UR, "%.1fWh", CEND } },		/* low battery */
 	{ wifi,			1,	{ AC, "W ", CEND, "%s" },						/* connected */
 						{ AC, "W ", CEND, UR, "disconnected", CEND } },	/* disconnected */
 	{ date,			1,	{ AC, "D ", CEND, "%s %02d-%02d  %d:%02d" } }

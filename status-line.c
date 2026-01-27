@@ -272,24 +272,25 @@ void temperature(struct element *ctx) {
 }
 
 void battery(struct element *ctx) {
-	FILE *capacity_f = fopen(BATTERY_PATH "/capacity", "r");
+	FILE *energy_f = fopen(BATTERY_PATH "/energy_now", "r");
 	FILE *status_f = fopen(BATTERY_PATH "/status", "r");
-	unsigned int capacity;
+	float energy;
 	char status[20];
 
-	if (!capacity_f || !status_f) return;
+	if (!energy_f || !status_f) return;
 
-	fscanf(capacity_f, "%u", &capacity);
+	fscanf(energy_f, "%f", &energy);
 	fscanf(status_f, "%s", status);
-	fclose(capacity_f);
+	fclose(energy_f);
 	fclose(status_f);
+	energy *= 1e-6;
 
 	if (strcmp(status, "Charging") == 0)
-		sprintf(ctx->buf, ctx->fmt2, capacity);
-	else if (capacity <= 10)
-		sprintf(ctx->buf, ctx->fmt3, capacity);
+		sprintf(ctx->buf, ctx->fmt2, energy);
+	else if (energy <= 2) /* 2Wh */
+		sprintf(ctx->buf, ctx->fmt3, energy);
 	else
-		sprintf(ctx->buf, ctx->fmt1, capacity);
+		sprintf(ctx->buf, ctx->fmt1, energy);
 }
 
 int wifi_cb(struct nl_msg *msg, void *data) {

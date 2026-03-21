@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 #include <signal.h>
 #include <unistd.h>
 #include <time.h>
@@ -275,22 +276,31 @@ void battery(struct element *ctx) {
 	FILE *energy_f = fopen(BATTERY_PATH "/energy_now", "r");
 	FILE *status_f = fopen(BATTERY_PATH "/status", "r");
 	float energy;
-	char status[20];
+	int ret;
+	char *status = NULL;
+	size_t status_len = 0;
 
 	if (!energy_f || !status_f) return;
 
 	fscanf(energy_f, "%f", &energy);
-	fscanf(status_f, "%s", status);
 	fclose(energy_f);
-	fclose(status_f);
 	energy *= 1e-6;
 
-	if (strcmp(status, "Charging") == 0)
-		sprintf(ctx->buf, ctx->fmt2, energy);
-	else if (energy <= 2) /* 2Wh */
-		sprintf(ctx->buf, ctx->fmt3, energy);
+	ret = getline(&status, &status_len, status_f);
+	fclose(status_f);
+	if (ret <= 0) {
+		if (status)
+			free(status);
+		return;
+	}
+	status[strlen(status) - 1] = '\0'; /* remove newline */
+	for (char *p = status; *p; p++) *p = tolower(*p);
+
+	if (strcmp(status, "discharging") == 0 && energy < 2) /* 2Wh */
+		sprintf(ctx->buf, ctx->fmt2, status, energy);
 	else
-		sprintf(ctx->buf, ctx->fmt1, energy);
+		sprintf(ctx->buf, ctx->fmt1, status, energy);
+	free(status);
 }
 
 int wifi_cb(struct nl_msg *msg, void *data) {

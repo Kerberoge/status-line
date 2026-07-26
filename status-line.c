@@ -5,10 +5,11 @@
 #include <signal.h>
 #include <unistd.h>
 #include <time.h>
-#include <libgen.h>
+#include <libgen.h>				/* next 2 are for the sleep state module */
 #include <sys/inotify.h>
 #include <pulse/pulseaudio.h>	/* next 2 are for the volume module */
 #include <pthread.h>
+#include <dirent.h>				/* for the temperature module */
 #include <net/if.h>				/* next 4 are for the wifi module */
 #include <linux/nl80211.h>
 #include <netlink/genl/genl.h>
@@ -255,11 +256,63 @@ void cpu(struct element *ctx) {
 		sprintf(ctx->buf, ctx->fmt1, usage);
 }
 
+int obtain_hwmon_path(const char *modname, const char *label, char *dest) {
+	DIR *hwmon_dir;
+	struct dirent *entry;
+	FILE *name_f, *label_f;
+	char path[50], *buf = NULL;
+	size_t buf_len;
+	int label_num;
+	int found = 0;
+
+	hwmon_dir = opendir("/sys/class/hwmon");
+	if (!hwmon_dir)
+		return -1;
+
+	while (entry = readdir(hwmon_dir)) {
+		sprintf(path, "/sys/class/hwmon/%s/name", entry->d_name);
+		name_f = fopen(path, "r");
+		if (!name_f)
+			continue;
+
+		getline(&buf, &buf_len, name_f);
+		strtok(buf, "\n");
+		fclose(name_f);
+		if (strcmp(buf, modname) != 0)
+			continue;
+
+		label_num = 1;
+		while (1) {
+			sprintf(path, "/sys/class/hwmon/%s/temp%d_label", entry->d_name, label_num);
+			label_f = fopen(path, "r");
+			if (!label_f)
+				break;
+
+			getline(&buf, &buf_len, label_f);
+			strtok(buf, "\n");
+			fclose(label_f);
+			if (strcmp(buf, label) == 0) {
+				sprintf(dest, "/sys/class/hwmon/%s/temp%d_input", entry->d_name, label_num);
+				found = 1;
+				break;
+			}
+
+			label_num++;
+		}
+	}
+
+	closedir(hwmon_dir);
+	return found - 1;
+}
+
 void temperature(struct element *ctx) {
-	FILE *temperature_f = fopen(HWMON_PATH, "r");
+	FILE *temperature_f = NULL;
 	int temperature;
 
-	if (!temperature_f) return;
+	if (ctx->data)
+		temperature_f = fopen(ctx->data, "r");
+	if (!temperature_f)
+		return;
 
 	fscanf(temperature_f, "%d", &temperature);
 	fclose(temperature_f);
@@ -413,6 +466,7 @@ int main() {
 	struct inotify_data idata;
 	struct kblayout_data kdata;
 	struct cpu_data cdata;
+	char hwmon_path[50];
 	int ret;
 
 	signal(SIGINT, quit);
@@ -427,14 +481,23 @@ int main() {
 		flatten_str_arr(e->fmt1, sizeof(e->fmt1), e->ufmt1, sizeof(e->ufmt1) / sizeof(char *));
 		flatten_str_arr(e->fmt2, sizeof(e->fmt2), e->ufmt2, sizeof(e->ufmt2) / sizeof(char *));
 		flatten_str_arr(e->fmt3, sizeof(e->fmt3), e->ufmt3, sizeof(e->ufmt3) / sizeof(char *));
-		if (e->func == volume)
+		if (e->func == volume) {
 			pfds[PULSE].fd = pulse_setup(e, &pdata);
-		else if (e->func == sleep_state)
+		} else if (e->func == sleep_state) {
 			pfds[INOTIFY].fd = inotify_setup(e, &idata);
-		else if (e->func == kblayout)
+		} else if (e->func == kblayout) {
 			pfds[KBLAYOUT].fd = kblayout_setup(e, &kdata);
-		else if (e->func == cpu)
+		} else if (e->func == cpu) {
 			e->data = &cdata;
+		} else if (e->func == temperature) {
+			ret = obtain_hwmon_path("coretemp", "Package id 0", hwmon_path);
+			if (ret < 0) {
+				e->call = 0;
+				e->data = NULL;
+			} else {
+				e->data = hwmon_path;
+			}
+		}
 	}
 
 	print_status();
